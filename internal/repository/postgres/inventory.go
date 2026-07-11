@@ -282,7 +282,9 @@ func (r *InventoryRepository) ReleaseExpiredHolds(ctx context.Context) (int64, e
 	query := `
 		UPDATE inventory_units
 		SET status = 'available', held_until = NULL, version = version + 1, updated_at = NOW()
-		WHERE status = 'held' AND held_until IS NOT NULL AND held_until < NOW()
+		WHERE status = 'held'
+		  AND held_until IS NOT NULL
+		  AND held_until < NOW()
 	`
 	cmdTag, err := r.db.Exec(ctx, query)
 	if err != nil {

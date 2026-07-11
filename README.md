@@ -150,6 +150,10 @@ curl -X POST http://localhost:8080/bookings \
   -d '{"items":[{"inventory_unit_id":"<held-seat-id>"}]}'
 ```
 
+Retrying the same request with the same `Idempotency-Key` returns the original
+booking with HTTP `200` and `X-Idempotency-Replayed: true`. Reusing the key
+with a different body returns HTTP `422`.
+
 **Confirm Booking**
 ```bash
 curl -X POST http://localhost:8080/bookings/{bookingId}/confirm \
@@ -169,6 +173,7 @@ go test -race -cover ./...
 ```bash
 # Run with Docker dependencies
 docker compose up -d postgres redis
+set GBOOKING_INTEGRATION=1
 go test -race -v ./test/concurrency/...
 
 # Expected output:
@@ -176,6 +181,10 @@ go test -race -v ./test/concurrency/...
 # 100 goroutines, 1 succeeded, 99 rejected (ErrSeatUnavailable)
 # --- PASS: TestHoldSeat_ConcurrentRequests (0.42s)
 ```
+
+The concurrency suite creates isolated UUID-based fixtures, synchronizes all
+goroutines before the hold attempt, and verifies both final inventory status
+and the single version increment.
 
 ### Integration Tests
 ```bash

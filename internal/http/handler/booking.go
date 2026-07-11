@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -37,17 +38,22 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 
 	booking, err := h.bookingService.CreateBooking(c.Request.Context(), userID.(uuid.UUID), req, idempotencyKey)
 	if err != nil {
-		if err.Error() == "idempotency key conflict: different request body" {
+		var replay *service.IdempotentReplayError
+		if errors.As(err, &replay) {
+			c.Header("X-Idempotency-Replayed", "true")
+			c.JSON(http.StatusOK, replay.Booking)
+			return
+		}
+		if errors.Is(err, service.ErrIdempotencyConflict) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Idempotency-Key conflict: different request body"})
+			return
+		}
+		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrInsufficientInventory) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Check if this was a cached response
-	if cached, ok := c.Get("idempotency_cached"); ok && cached == true {
-		c.Header("X-Idempotency-Cached", "true")
 	}
 
 	c.JSON(http.StatusCreated, booking)
@@ -187,47 +193,4 @@ func (h *BookingHandler) CancelBooking(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, booking)
-}
-
-// IdempotencyMiddleware handles idempotency key processing
-func IdempotencyMiddleware(bookingService *service.BookingService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Only apply to mutating methods
-		if c.Request.Method == "GET" || c.Request.Method == "HEAD" || c.Request.Method == "OPTIONS" {
-			c.Next()
-			return
-		}
-
-		idempotencyKey := c.GetHeader("Idempotency-Key")
-		if idempotencyKey == "" {
-			c.Next()
-			return
-		}
-
-		// Read and store request body for hash comparison
-		body, err := c.GetRawData()
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-			return
-		}
-
-		// Check if key exists
-		existingBooking, err := bookingService.GetBookingByIdempotencyKey(c.Request.Context(), idempotencyKey)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-
-		_ = existingBooking
-
-		// Store body for later use
-		c.Set("idempotency_key", idempotencyKey)
-		c.Set("idempotency_body", body)
-		c.Next()
-	}
-}
-
-func computeRequestHash(body []byte) string {
-	// Simple hash - in production use proper serialization
-	return string(body) // placeholder
 }

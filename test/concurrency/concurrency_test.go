@@ -45,13 +45,16 @@ func TestHoldSeat_ConcurrentRequests(t *testing.T) {
 	var failureCount int32
 	var wg sync.WaitGroup
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	seatID := seatIDs[0]
+	start := make(chan struct{})
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 
 			unit, err := holdService.HoldSeat(ctx, seatID, 10)
 			if err != nil {
@@ -67,6 +70,7 @@ func TestHoldSeat_ConcurrentRequests(t *testing.T) {
 		}()
 	}
 
+	close(start)
 	wg.Wait()
 
 	t.Logf("Results: %d succeeded, %d failed", successCount, failureCount)
@@ -87,6 +91,12 @@ func TestHoldSeat_ConcurrentRequests(t *testing.T) {
 	}
 	if unit.Status != domain.InventoryStatusHeld {
 		t.Errorf("Expected seat status 'held', got '%s'", unit.Status)
+	}
+	if unit.HeldUntil == nil || !unit.HeldUntil.After(time.Now()) {
+		t.Errorf("Expected active hold expiry, got %v", unit.HeldUntil)
+	}
+	if unit.Version != 2 {
+		t.Errorf("Expected exactly one version increment, got %d", unit.Version)
 	}
 }
 
@@ -114,13 +124,16 @@ func TestHoldRoom_ConcurrentRequests(t *testing.T) {
 	var failureCount int32
 	var wg sync.WaitGroup
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	roomID := roomIDs[0]
+	start := make(chan struct{})
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 
 			unit, err := holdService.HoldRoom(ctx, roomID, 10)
 			if err != nil {
@@ -136,6 +149,7 @@ func TestHoldRoom_ConcurrentRequests(t *testing.T) {
 		}()
 	}
 
+	close(start)
 	wg.Wait()
 
 	t.Logf("Results: %d succeeded, %d failed", successCount, failureCount)
@@ -337,6 +351,10 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
+	if err := db.Ping(ctx); err != nil {
+		db.Close()
+		t.Fatalf("Failed to ping database: %v", err)
+	}
 
 	return db
 }
@@ -362,7 +380,7 @@ func createTestUser(t *testing.T, db *pgxpool.Pool) uuid.UUID {
 	ctx := context.Background()
 	_, err := db.Exec(ctx, `
 		INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)
-	`, userID, "test@example.com", "hash", "user")
+	`, userID, "test-"+userID.String()+"@example.com", "hash", "user")
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
@@ -376,7 +394,7 @@ func createTestFlight(t *testing.T, db *pgxpool.Pool) uuid.UUID {
 	_, err := db.Exec(ctx, `
 		INSERT INTO flights (id, code, origin, destination, departure_time, arrival_time, base_price)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, flightID, "TEST123", "SGN", "HAN", time.Now().Add(24*time.Hour), time.Now().Add(26*time.Hour), 1000000)
+	`, flightID, "TEST-"+flightID.String()[:8], "SGN", "HAN", time.Now().Add(24*time.Hour), time.Now().Add(26*time.Hour), 1000000)
 	if err != nil {
 		t.Fatalf("Failed to create flight: %v", err)
 	}
@@ -413,7 +431,7 @@ func createTestHotel(t *testing.T, db *pgxpool.Pool) uuid.UUID {
 	_, err := db.Exec(ctx, `
 		INSERT INTO hotels (id, name, city, address)
 		VALUES ($1, $2, $3, $4)
-	`, hotelID, "Test Hotel", "Test City", "Test Address")
+	`, hotelID, "Test Hotel "+hotelID.String()[:8], "Test City", "Test Address")
 	if err != nil {
 		t.Fatalf("Failed to create hotel: %v", err)
 	}

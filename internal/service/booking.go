@@ -21,9 +21,18 @@ var (
 	ErrBookingNotPending     = errors.New("booking is not in pending status")
 	ErrBookingExpired        = errors.New("booking has expired")
 	ErrIdempotencyConflict   = errors.New("idempotency key conflict: same key with different request")
+	ErrIdempotentReplay      = errors.New("idempotent response replay")
 	ErrInsufficientInventory = errors.New("insufficient inventory for booking")
 	ErrPaymentFailed         = errors.New("payment failed")
 )
+
+type IdempotentReplayError struct {
+	Booking *domain.Booking
+}
+
+func (e *IdempotentReplayError) Error() string { return ErrIdempotentReplay.Error() }
+
+func (e *IdempotentReplayError) Unwrap() error { return ErrIdempotentReplay }
 
 type BookingService struct {
 	bookingRepo     *postgres.BookingRepository
@@ -67,16 +76,21 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 		requestHash := s.computeRequestHash(req)
 		existing, err := s.idempotencyRepo.Get(ctx, idempotencyKey)
 		if err == nil {
-			// Key exists, check if same request
 			if existing.RequestHash != requestHash {
 				return nil, ErrIdempotencyConflict
 			}
-			// Return cached response
-			// In a real implementation, you'd unmarshal the response body
-			// For now, we'll just return an error indicating idempotent response
-			return nil, fmt.Errorf("idempotent response cached")
+			if existing.Status == "completed" {
+				booking, decodeErr := decodeCachedBooking(existing.ResponseBody)
+				if decodeErr != nil {
+					return nil, decodeErr
+				}
+				return booking, &IdempotentReplayError{Booking: booking}
+			}
+			if existing.Status == "processing" {
+				return s.waitForIdempotencyCompletion(ctx, idempotencyKey, requestHash)
+			}
 		}
-		if !errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
+		if err != nil && !errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
 			return nil, err
 		}
 
@@ -89,6 +103,9 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 			CreatedAt:    time.Now(),
 			ExpiresAt:    time.Now().Add(24 * time.Hour),
 		}); err != nil {
+			if errors.Is(err, postgres.ErrIdempotencyKeyConflict) {
+				return s.waitForIdempotencyCompletion(ctx, idempotencyKey, requestHash)
+			}
 			return nil, err
 		}
 	}
@@ -162,15 +179,10 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 
 	// Save idempotency response
 	if idempotencyKey != "" {
-		responseBody := map[string]interface{}{
-			"booking_id": booking.ID,
-			"status":     booking.Status,
-			"total":      booking.TotalAmount,
-		}
 		if err := s.idempotencyRepo.Update(ctx, &domain.IdempotencyKey{
 			Key:          idempotencyKey,
 			RequestHash:  s.computeRequestHash(req),
-			ResponseBody: mustJSON(responseBody),
+			ResponseBody: mustJSON(booking),
 			Status:       "completed",
 			CreatedAt:    time.Now(),
 			ExpiresAt:    time.Now().Add(24 * time.Hour),
@@ -355,10 +367,51 @@ func (s *BookingService) calculateRefund(booking *domain.Booking) float64 {
 }
 
 func (s *BookingService) computeRequestHash(req domain.CreateBookingRequest) string {
-	// Simple hash of request - in production use proper serialization
-	data := fmt.Sprintf("%v", req.Items)
-	hash := sha256.Sum256([]byte(data))
+	data := mustJSON(req)
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
+}
+
+func (s *BookingService) waitForIdempotencyCompletion(ctx context.Context, key, requestHash string) (*domain.Booking, error) {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			record, err := s.idempotencyRepo.Get(ctx, key)
+			if err != nil {
+				if errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			if record.RequestHash != requestHash {
+				return nil, ErrIdempotencyConflict
+			}
+			if record.Status == "completed" {
+				booking, err := decodeCachedBooking(record.ResponseBody)
+				if err != nil {
+					return nil, err
+				}
+				return booking, &IdempotentReplayError{Booking: booking}
+			}
+		case <-deadline.C:
+			return nil, fmt.Errorf("idempotency request still processing")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func decodeCachedBooking(data []byte) (*domain.Booking, error) {
+	var booking domain.Booking
+	if err := json.Unmarshal(data, &booking); err != nil {
+		return nil, fmt.Errorf("decode cached booking: %w", err)
+	}
+	return &booking, nil
 }
 
 func ptr[T any](v T) *T {

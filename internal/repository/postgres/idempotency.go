@@ -3,9 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,16 +26,16 @@ func NewIdempotencyRepository(db *pgxpool.Pool) *IdempotencyRepository {
 }
 
 func (r *IdempotencyRepository) Create(ctx context.Context, key *domain.IdempotencyKey) error {
-	responseBody, err := json.Marshal(key.ResponseBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal response body: %w", err)
+	responseBody := key.ResponseBody
+	if len(responseBody) == 0 {
+		responseBody = []byte(`{}`)
 	}
 
 	query := `
 		INSERT INTO idempotency_keys (key, request_hash, response_body, status, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	_, err = r.db.Exec(ctx, query, key.Key, key.RequestHash, responseBody, key.Status, key.CreatedAt, key.ExpiresAt)
+	_, err := r.db.Exec(ctx, query, key.Key, key.RequestHash, responseBody, key.Status, key.CreatedAt, key.ExpiresAt)
 	if err != nil {
 		// Check for unique constraint violation
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
@@ -71,11 +69,7 @@ func (r *IdempotencyRepository) Get(ctx context.Context, key string) (*domain.Id
 	}
 
 	// Unmarshal response body
-	if len(responseBody) > 0 {
-		if err := json.Unmarshal(responseBody, &ik.ResponseBody); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response body: %w", err)
-		}
-	}
+	ik.ResponseBody = append([]byte(nil), responseBody...)
 
 	// Check if expired
 	if time.Now().After(ik.ExpiresAt) {
@@ -86,9 +80,9 @@ func (r *IdempotencyRepository) Get(ctx context.Context, key string) (*domain.Id
 }
 
 func (r *IdempotencyRepository) Update(ctx context.Context, key *domain.IdempotencyKey) error {
-	responseBody, err := json.Marshal(key.ResponseBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal response body: %w", err)
+	responseBody := key.ResponseBody
+	if len(responseBody) == 0 {
+		responseBody = []byte(`{}`)
 	}
 
 	query := `
@@ -96,7 +90,7 @@ func (r *IdempotencyRepository) Update(ctx context.Context, key *domain.Idempote
 		SET response_body = $1, status = $2
 		WHERE key = $3
 	`
-	_, err = r.db.Exec(ctx, query, responseBody, key.Status, key.Key)
+	_, err := r.db.Exec(ctx, query, responseBody, key.Status, key.Key)
 	return err
 }
 
