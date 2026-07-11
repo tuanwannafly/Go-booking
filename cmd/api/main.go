@@ -66,7 +66,6 @@ func main() {
 	if err := workerService.Start(context.Background()); err != nil {
 		log.Fatalf("Failed to start worker: %v", err)
 	}
-	defer workerService.Stop()
 
 	// Create HTTP server
 	server := &http.Server{
@@ -98,6 +97,9 @@ func main() {
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+	if err := workerService.Stop(); err != nil {
+		log.Printf("Worker shutdown completed with error: %v", err)
 	}
 
 	log.Println("Server exited")
