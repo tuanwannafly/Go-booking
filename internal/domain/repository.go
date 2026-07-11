@@ -46,6 +46,7 @@ type BookingRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*Booking, error)
 	GetByUserID(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]Booking, int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status BookingStatus) error
+	Confirm(ctx context.Context, bookingID uuid.UUID, payment *Payment) error
 	UpdateExpiresAt(ctx context.Context, id uuid.UUID, expiresAt *time.Time) error
 	GetByIdempotencyKey(ctx context.Context, key string) (*Booking, error)
 }

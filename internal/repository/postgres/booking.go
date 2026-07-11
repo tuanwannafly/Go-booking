@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrBookingNotFound      = errors.New("booking not found")
-	ErrBookingNotPending    = errors.New("booking is not in pending status")
-	ErrIdempotencyKeyExists = errors.New("idempotency key already exists with different request")
+	ErrBookingNotFound         = errors.New("booking not found")
+	ErrBookingNotPending       = errors.New("booking is not in pending status")
+	ErrBookingAlreadyConfirmed = errors.New("booking already confirmed")
+	ErrIdempotencyKeyExists    = errors.New("idempotency key already exists with different request")
 )
 
 type BookingRepository struct {
@@ -127,6 +128,73 @@ func (r *BookingRepository) UpdateStatus(ctx context.Context, id uuid.UUID, stat
 		return ErrBookingNotFound
 	}
 	return nil
+}
+
+// Confirm atomically transitions the booking, inventory and mock payment.
+// The booking row lock serializes concurrent confirmation requests.
+func (r *BookingRepository) Confirm(ctx context.Context, bookingID uuid.UUID, payment *domain.Payment) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var status domain.BookingStatus
+	row := tx.QueryRow(ctx, `SELECT status FROM bookings WHERE id = $1 FOR UPDATE`, bookingID)
+	if err := row.Scan(&status); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrBookingNotFound
+		}
+		return err
+	}
+	if status == domain.BookingStatusConfirmed {
+		return ErrBookingAlreadyConfirmed
+	}
+	if status != domain.BookingStatusPending {
+		return ErrBookingNotPending
+	}
+
+	var itemCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM booking_items WHERE booking_id = $1`, bookingID).Scan(&itemCount); err != nil {
+		return err
+	}
+	if itemCount == 0 {
+		return errors.New("booking has no items")
+	}
+
+	result, err := tx.Exec(ctx, `
+		UPDATE inventory_units
+		SET status = 'booked', held_until = NULL, version = version + 1, updated_at = NOW()
+		WHERE id IN (SELECT inventory_unit_id FROM booking_items WHERE booking_id = $1)
+		  AND status = 'held'
+	`, bookingID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != int64(itemCount) {
+		return errors.New("some booking items are no longer held")
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO payments (id, booking_id, status, amount, provider_ref, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, payment.ID, payment.BookingID, payment.Status, payment.Amount, payment.ProviderRef, payment.CreatedAt, payment.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	result, err = tx.Exec(ctx, `
+		UPDATE bookings SET status = 'confirmed', updated_at = NOW()
+		WHERE id = $1 AND status = 'pending'
+	`, bookingID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrBookingNotPending
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *BookingRepository) UpdateExpiresAt(ctx context.Context, id uuid.UUID, expiresAt *time.Time) error {

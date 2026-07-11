@@ -144,11 +144,17 @@ func (h *BookingHandler) ConfirmBooking(c *gin.Context) {
 
 	booking, err := h.bookingService.ConfirmBooking(c.Request.Context(), bookingID, req)
 	if err != nil {
-		if err.Error() == "booking not found" {
+		var replay *service.IdempotentReplayError
+		if errors.As(err, &replay) {
+			c.Header("X-Booking-Replayed", "true")
+			c.JSON(http.StatusOK, replay.Booking)
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
 			return
 		}
-		if err.Error() == "booking is not in pending status" {
+		if errors.Is(err, service.ErrBookingNotPending) {
 			c.JSON(http.StatusConflict, gin.H{"error": "booking cannot be confirmed"})
 			return
 		}

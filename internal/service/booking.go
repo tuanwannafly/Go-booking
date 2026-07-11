@@ -207,6 +207,9 @@ func (s *BookingService) GetUserBookings(ctx context.Context, userID uuid.UUID, 
 }
 
 func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID, req domain.ConfirmBookingRequest) (*domain.Booking, error) {
+	if req.PaymentMethod == "" {
+		return nil, errors.New("payment method is required")
+	}
 	booking, err := s.bookingRepo.GetByIDWithItems(ctx, bookingID)
 	if err != nil {
 		return nil, err
@@ -216,6 +219,9 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 	}
 
 	if booking.Status != domain.BookingStatusPending {
+		if booking.Status == domain.BookingStatusConfirmed {
+			return booking, &IdempotentReplayError{Booking: booking}
+		}
 		return nil, ErrBookingNotPending
 	}
 
@@ -224,17 +230,6 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 		// Expire the booking
 		s.expireBooking(ctx, booking)
 		return nil, ErrBookingExpired
-	}
-
-	// Get inventory unit IDs
-	inventoryUnitIDs := make([]uuid.UUID, len(booking.Items))
-	for i, item := range booking.Items {
-		inventoryUnitIDs[i] = item.InventoryUnitID
-	}
-
-	// Confirm inventory (held -> booked)
-	if err := s.inventoryRepo.ConfirmBooking(ctx, inventoryUnitIDs); err != nil {
-		return nil, err
 	}
 
 	// Create mock payment
@@ -247,12 +242,7 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	if err := s.paymentRepo.Create(ctx, payment); err != nil {
-		return nil, err
-	}
-
-	// Update booking status
-	if err := s.bookingRepo.UpdateStatus(ctx, bookingID, domain.BookingStatusConfirmed); err != nil {
+	if err := s.bookingRepo.Confirm(ctx, bookingID, payment); err != nil {
 		return nil, err
 	}
 
