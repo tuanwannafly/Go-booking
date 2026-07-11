@@ -1,0 +1,28 @@
+# Binaries
+/bin/
+/api
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test
+coverage.out
+coverage.html
+
+# Build
+dist/
+build/
