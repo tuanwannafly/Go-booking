@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gobooking
+          POSTGRES_PASSWORD: gobooking
+          POSTGRES_DB: gobooking
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U gobooking -d gobooking"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Run tests with race detector
+        run: go test -race -cover ./...
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: gobooking
+          DB_PASSWORD: gobooking
+          DB_NAME: gobooking
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+
+      - name: Build Docker image
+        run: docker build -t gobooking:ci .
