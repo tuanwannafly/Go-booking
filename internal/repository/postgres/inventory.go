@@ -178,6 +178,9 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 
 // HoldRoomWithOptimisticLock uses optimistic locking for hotel rooms (lower contention)
 func (r *InventoryRepository) HoldRoomWithOptimisticLock(ctx context.Context, roomID uuid.UUID, holdDuration time.Duration, maxRetries int) (*domain.InventoryUnit, error) {
+	if maxRetries < 0 {
+		return nil, fmt.Errorf("max retries must be non-negative")
+	}
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -189,7 +192,13 @@ func (r *InventoryRepository) HoldRoomWithOptimisticLock(ctx context.Context, ro
 		lastErr = err
 		if errors.Is(err, ErrOptimisticLockConflict) {
 			// Retry on version conflict
-			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+			backoff := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				backoff.Stop()
+				return nil, ctx.Err()
+			case <-backoff.C:
+			}
 			continue
 		}
 
@@ -204,7 +213,7 @@ func (r *InventoryRepository) tryHoldRoomOptimistic(ctx context.Context, roomID 
 	// First, get the current version
 	query := `
 		SELECT id, resource_type, resource_id, unit_code, status, held_until, version, created_at, updated_at
-		FROM inventory_units WHERE id = $1
+		FROM inventory_units WHERE id = $1 AND resource_type = 'hotel_room'
 	`
 	row := r.db.QueryRow(ctx, query, roomID)
 
@@ -237,7 +246,7 @@ func (r *InventoryRepository) tryHoldRoomOptimistic(ctx context.Context, roomID 
 	updateQuery := `
 		UPDATE inventory_units
 		SET status = 'held', held_until = $1, version = version + 1, updated_at = NOW()
-		WHERE id = $2 AND version = $3
+		WHERE id = $2 AND resource_type = 'hotel_room' AND version = $3
 	`
 	cmdTag, err := r.db.Exec(ctx, updateQuery, heldUntilTime, roomID, unit.Version)
 	if err != nil {

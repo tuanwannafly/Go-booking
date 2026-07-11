@@ -157,13 +157,13 @@ type HotelSearchParams struct {
 }
 
 type HoldSeatRequest struct {
-	SeatID       uuid.UUID `json:"seat_id" binding:"required"`
-	HoldDuration int       `json:"hold_duration" binding:"required,min=1,max=60"` // minutes
+	SeatID       uuid.UUID `json:"seat_id,omitempty"`
+	HoldDuration int       `json:"hold_duration,omitempty" binding:"omitempty,min=1,max=60"` // minutes
 }
 
 type HoldRoomRequest struct {
-	RoomID       uuid.UUID `json:"room_id" binding:"required"`
-	HoldDuration int       `json:"hold_duration" binding:"required,min=1,max=60"` // minutes
+	RoomID       uuid.UUID `json:"room_id,omitempty"`
+	HoldDuration int       `json:"hold_duration,omitempty" binding:"omitempty,min=1,max=60"` // minutes
 }
 
 type CreateBookingRequest struct {

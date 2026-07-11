@@ -36,7 +36,6 @@ func (h *HoldHandler) HoldSeat(c *gin.Context) {
 	// Override with path parameter
 	req.SeatID = seatID
 
-	holdDuration := time.Duration(req.HoldDuration) * time.Minute
 	unit, err := h.holdService.HoldSeat(c.Request.Context(), req.SeatID, req.HoldDuration)
 	if err != nil {
 		if errors.Is(err, postgres.ErrInventoryNotAvailable) || errors.Is(err, postgres.ErrInventoryNotFound) {
@@ -58,7 +57,7 @@ func (h *HoldHandler) HoldSeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"inventory_unit": unit,
 		"held_until":     unit.HeldUntil,
-		"expires_in":     int(holdDuration.Seconds()),
+		"expires_in":     expiresInSeconds(unit.HeldUntil),
 	})
 }
 
@@ -95,12 +94,22 @@ func (h *HoldHandler) HoldRoom(c *gin.Context) {
 		return
 	}
 
-	holdDuration := time.Duration(req.HoldDuration) * time.Minute
 	c.JSON(http.StatusOK, gin.H{
 		"inventory_unit": unit,
 		"held_until":     unit.HeldUntil,
-		"expires_in":     int(holdDuration.Seconds()),
+		"expires_in":     expiresInSeconds(unit.HeldUntil),
 	})
+}
+
+func expiresInSeconds(deadline *time.Time) int {
+	if deadline == nil {
+		return 0
+	}
+	remaining := time.Until(*deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	return int(remaining.Round(time.Second).Seconds())
 }
 
 func (h *HoldHandler) ReleaseHold(c *gin.Context) {
