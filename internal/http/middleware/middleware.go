@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -86,8 +87,10 @@ func RateLimitMiddleware(requestsPerSecond float64, burst int) gin.HandlerFunc {
 	}
 
 	limiters := make(map[string]*clientLimiter)
+	var mu sync.Mutex
 
 	return func(c *gin.Context) {
+		mu.Lock()
 		clientIP := c.ClientIP()
 		now := time.Now()
 
@@ -109,6 +112,7 @@ func RateLimitMiddleware(requestsPerSecond float64, burst int) gin.HandlerFunc {
 		limiter.lastRefill = now
 
 		if limiter.tokens < 1 {
+			mu.Unlock()
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error": "rate limit exceeded",
 			})
@@ -116,6 +120,7 @@ func RateLimitMiddleware(requestsPerSecond float64, burst int) gin.HandlerFunc {
 		}
 
 		limiter.tokens--
+		mu.Unlock()
 		c.Next()
 	}
 }

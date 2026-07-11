@@ -2,10 +2,10 @@ package config
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
-	"strings"
 )
 
 type Config struct {
@@ -70,15 +70,29 @@ func Load() (*Config, error) {
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	for _, key := range []string{
-		"app.env", "app.log_level", "app.timezone", "app.jwt_secret",
-		"postgres.host", "postgres.port", "postgres.user", "postgres.password", "postgres.database", "postgres.sslmode",
-		"redis.host", "redis.port", "redis.password", "redis.db",
-		"server.host", "server.port", "server.read_timeout", "server.write_timeout", "server.idle_timeout",
-		"worker.hold_release_interval", "worker.booking_expire_interval", "worker.hold_duration_minutes", "worker.booking_expire_minutes",
-	} {
-		_ = viper.BindEnv(key)
-	}
+	bindEnv("app.env", "APP_ENV")
+	bindEnv("app.log_level", "LOG_LEVEL")
+	bindEnv("app.timezone", "APP_TIMEZONE")
+	bindEnv("app.jwt_secret", "JWT_SECRET")
+	bindEnv("postgres.host", "DB_HOST")
+	bindEnv("postgres.port", "DB_PORT")
+	bindEnv("postgres.user", "DB_USER")
+	bindEnv("postgres.password", "DB_PASSWORD")
+	bindEnv("postgres.database", "DB_NAME")
+	bindEnv("postgres.sslmode", "DB_SSLMODE")
+	bindEnv("redis.host", "REDIS_HOST")
+	bindEnv("redis.port", "REDIS_PORT")
+	bindEnv("redis.password", "REDIS_PASSWORD")
+	bindEnv("redis.db", "REDIS_DB")
+	bindEnv("server.host", "SERVER_HOST")
+	bindEnv("server.port", "SERVER_PORT")
+	bindEnv("server.read_timeout", "SERVER_READ_TIMEOUT")
+	bindEnv("server.write_timeout", "SERVER_WRITE_TIMEOUT")
+	bindEnv("server.idle_timeout", "SERVER_IDLE_TIMEOUT")
+	bindEnv("worker.hold_release_interval", "WORKER_HOLD_RELEASE_INTERVAL")
+	bindEnv("worker.booking_expire_interval", "WORKER_BOOKING_EXPIRE_INTERVAL")
+	bindEnv("worker.hold_duration_minutes", "WORKER_HOLD_DURATION_MINUTES")
+	bindEnv("worker.booking_expire_minutes", "WORKER_BOOKING_EXPIRE_MINUTES")
 
 	setDefaults()
 
@@ -94,6 +108,10 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func bindEnv(key, env string) {
+	_ = viper.BindEnv(key, env)
 }
 
 func setDefaults() {
