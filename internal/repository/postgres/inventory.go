@@ -128,7 +128,9 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 	// SELECT FOR UPDATE - pessimistic lock at database level
 	query := `
 		SELECT id, resource_type, resource_id, unit_code, status, held_until, version, created_at, updated_at
-		FROM inventory_units WHERE id = $1 FOR UPDATE
+		FROM inventory_units
+		WHERE id = $1 AND resource_type = 'flight_seat'
+		FOR UPDATE
 	`
 	row := tx.QueryRow(ctx, query, seatID)
 
@@ -146,15 +148,8 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 		unit.HeldUntil = &heldUntil.Time
 	}
 
-	// Check if available
-	if unit.Status != domain.InventoryStatusAvailable {
-		return nil, ErrInventoryNotAvailable
-	}
-
-	// Check if hold has expired
-	if unit.HeldUntil != nil && unit.HeldUntil.Before(time.Now()) {
-		// Expired hold, can be re-held
-	} else if unit.Status == domain.InventoryStatusHeld {
+	if unit.Status != domain.InventoryStatusAvailable &&
+		!(unit.Status == domain.InventoryStatusHeld && unit.HeldUntil != nil && unit.HeldUntil.Before(time.Now())) {
 		return nil, ErrInventoryNotAvailable
 	}
 
