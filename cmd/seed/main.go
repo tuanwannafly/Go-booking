@@ -19,6 +19,8 @@ func main() {
 	}
 
 	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	db, err := pgxpool.New(ctx, cfg.Postgres.DSN())
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -26,30 +28,43 @@ func main() {
 	defer db.Close()
 
 	// Seed flights
-	flightIDs := seedFlights(ctx, db)
+	flightIDs, err := seedFlights(ctx, db)
+	if err != nil {
+		log.Fatalf("Failed to seed flights: %v", err)
+	}
 	log.Printf("Created %d flights", len(flightIDs))
 
 	// Seed hotels
-	hotelIDs := seedHotels(ctx, db)
+	hotelIDs, err := seedHotels(ctx, db)
+	if err != nil {
+		log.Fatalf("Failed to seed hotels: %v", err)
+	}
 	log.Printf("Created %d hotels", len(hotelIDs))
 
 	// Seed room types and rooms
 	for _, hotelID := range hotelIDs {
-		roomTypeIDs := seedRoomTypes(ctx, db, hotelID)
+		roomTypeIDs, err := seedRoomTypes(ctx, db, hotelID)
+		if err != nil {
+			log.Fatalf("Failed to seed room types: %v", err)
+		}
 		for _, rtID := range roomTypeIDs {
-			seedRooms(ctx, db, rtID, 10) // 10 rooms per type
+			if err := seedRooms(ctx, db, rtID, 10); err != nil {
+				log.Fatalf("Failed to seed rooms: %v", err)
+			}
 		}
 	}
 
 	// Seed seats for flights
 	for _, flightID := range flightIDs {
-		seedSeats(ctx, db, flightID, 180) // 180 seats per flight
+		if err := seedSeats(ctx, db, flightID, 180); err != nil {
+			log.Fatalf("Failed to seed seats: %v", err)
+		}
 	}
 
 	log.Println("Seeding completed successfully!")
 }
 
-func seedFlights(ctx context.Context, db *pgxpool.Pool) []uuid.UUID {
+func seedFlights(ctx context.Context, db *pgxpool.Pool) ([]uuid.UUID, error) {
 	routes := []struct {
 		code        string
 		origin      string
@@ -85,15 +100,14 @@ func seedFlights(ctx context.Context, db *pgxpool.Pool) []uuid.UUID {
 		`, flightID, route.code, route.origin, route.destination, departureTime, arrivalTime, route.basePrice)
 
 		if err != nil {
-			log.Printf("Failed to insert flight %s: %v", route.code, err)
-			continue
+			return nil, fmt.Errorf("insert flight %s: %w", route.code, err)
 		}
 	}
 
-	return flightIDs
+	return flightIDs, nil
 }
 
-func seedHotels(ctx context.Context, db *pgxpool.Pool) []uuid.UUID {
+func seedHotels(ctx context.Context, db *pgxpool.Pool) ([]uuid.UUID, error) {
 	hotels := []struct {
 		name    string
 		city    string
@@ -117,15 +131,14 @@ func seedHotels(ctx context.Context, db *pgxpool.Pool) []uuid.UUID {
 		`, hotelID, h.name, h.city, h.address)
 
 		if err != nil {
-			log.Printf("Failed to insert hotel %s: %v", h.name, err)
-			continue
+			return nil, fmt.Errorf("insert hotel %s: %w", h.name, err)
 		}
 	}
 
-	return hotelIDs
+	return hotelIDs, nil
 }
 
-func seedRoomTypes(ctx context.Context, db *pgxpool.Pool, hotelID uuid.UUID) []uuid.UUID {
+func seedRoomTypes(ctx context.Context, db *pgxpool.Pool, hotelID uuid.UUID) ([]uuid.UUID, error) {
 	roomTypes := []struct {
 		name      string
 		basePrice float64
@@ -148,15 +161,14 @@ func seedRoomTypes(ctx context.Context, db *pgxpool.Pool, hotelID uuid.UUID) []u
 		`, rtID, hotelID, rt.name, rt.basePrice, rt.capacity)
 
 		if err != nil {
-			log.Printf("Failed to insert room type %s: %v", rt.name, err)
-			continue
+			return nil, fmt.Errorf("insert room type %s: %w", rt.name, err)
 		}
 	}
 
-	return rtIDs
+	return rtIDs, nil
 }
 
-func seedRooms(ctx context.Context, db *pgxpool.Pool, roomTypeID uuid.UUID, count int) {
+func seedRooms(ctx context.Context, db *pgxpool.Pool, roomTypeID uuid.UUID, count int) error {
 	rows := []string{"A", "B", "C", "D", "E", "F", "G", "H"}
 	floors := []int{1, 2, 3, 4, 5}
 
@@ -172,13 +184,13 @@ func seedRooms(ctx context.Context, db *pgxpool.Pool, roomTypeID uuid.UUID, coun
 		`, roomID, roomTypeID, unitCode)
 
 		if err != nil {
-			log.Printf("Failed to insert room: %v", err)
-			continue
+			return fmt.Errorf("insert room %s: %w", unitCode, err)
 		}
 	}
+	return nil
 }
 
-func seedSeats(ctx context.Context, db *pgxpool.Pool, flightID uuid.UUID, count int) {
+func seedSeats(ctx context.Context, db *pgxpool.Pool, flightID uuid.UUID, count int) error {
 	rows := []string{"A", "B", "C", "D", "E", "F"}
 	classes := []struct {
 		prefix string
@@ -201,10 +213,10 @@ func seedSeats(ctx context.Context, db *pgxpool.Pool, flightID uuid.UUID, count 
 			`, seatID, flightID, unitCode)
 
 			if err != nil {
-				log.Printf("Failed to insert seat: %v", err)
-				continue
+				return fmt.Errorf("insert seat %s: %w", unitCode, err)
 			}
 			seatNum++
 		}
 	}
+	return nil
 }

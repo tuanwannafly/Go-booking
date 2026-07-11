@@ -64,6 +64,13 @@ func (r *FlightRepository) Create(ctx context.Context, flight *domain.Flight) er
 	query := `
 		INSERT INTO flights (id, code, origin, destination, departure_time, arrival_time, base_price, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (code) DO UPDATE SET
+			origin = EXCLUDED.origin,
+			destination = EXCLUDED.destination,
+			departure_time = EXCLUDED.departure_time,
+			arrival_time = EXCLUDED.arrival_time,
+			base_price = EXCLUDED.base_price,
+			updated_at = NOW()
 	`
 	_, err := r.db.Exec(ctx, query, flight.ID, flight.Code, flight.Origin, flight.Destination, flight.DepartureTime, flight.ArrivalTime, flight.BasePrice, flight.CreatedAt, flight.UpdatedAt)
 	return err
@@ -93,7 +100,7 @@ func (r *FlightRepository) Search(ctx context.Context, params domain.FlightSearc
 
 	countQuery := `
 		SELECT COUNT(*) FROM flights
-		WHERE origin = $1 AND destination = $2 AND departure_time >= $3 AND departure_time < $4
+		WHERE UPPER(origin) = UPPER($1) AND UPPER(destination) = UPPER($2) AND departure_time >= $3 AND departure_time < $4
 	`
 	var total int64
 	err = r.db.QueryRow(ctx, countQuery, params.Origin, params.Destination, startOfDay, endOfDay).Scan(&total)
@@ -109,7 +116,7 @@ func (r *FlightRepository) Search(ctx context.Context, params domain.FlightSearc
 	query := `
 		SELECT id, code, origin, destination, departure_time, arrival_time, base_price, created_at, updated_at
 		FROM flights
-		WHERE origin = $1 AND destination = $2 AND departure_time >= $3 AND departure_time < $4
+		WHERE UPPER(origin) = UPPER($1) AND UPPER(destination) = UPPER($2) AND departure_time >= $3 AND departure_time < $4
 		ORDER BY departure_time
 		LIMIT $5 OFFSET $6
 	`
@@ -162,16 +169,19 @@ func (r *HotelRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Ho
 }
 
 func (r *HotelRepository) Search(ctx context.Context, params domain.HotelSearchParams) ([]domain.Hotel, int64, error) {
-	_, err := time.Parse("2006-01-02", params.CheckIn)
+	checkIn, err := time.Parse("2006-01-02", params.CheckIn)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid checkin date: %w", err)
 	}
-	_, err = time.Parse("2006-01-02", params.CheckOut)
+	checkOut, err := time.Parse("2006-01-02", params.CheckOut)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid checkout date: %w", err)
 	}
+	if !checkOut.After(checkIn) {
+		return nil, 0, fmt.Errorf("checkout must be after checkin")
+	}
 
-	countQuery := `SELECT COUNT(*) FROM hotels WHERE city = $1`
+	countQuery := `SELECT COUNT(*) FROM hotels WHERE LOWER(city) = LOWER($1)`
 	var total int64
 	err = r.db.QueryRow(ctx, countQuery, params.City).Scan(&total)
 	if err != nil {
@@ -186,7 +196,7 @@ func (r *HotelRepository) Search(ctx context.Context, params domain.HotelSearchP
 	query := `
 		SELECT id, name, city, address, created_at, updated_at
 		FROM hotels
-		WHERE city = $1
+		WHERE LOWER(city) = LOWER($1)
 		ORDER BY name
 		LIMIT $2 OFFSET $3
 	`

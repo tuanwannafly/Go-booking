@@ -32,10 +32,13 @@ func (h *SearchHandler) SearchFlights(c *gin.Context) {
 	if params.PageSize <= 0 {
 		params.PageSize = 10
 	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
 
 	flights, total, err := h.searchService.SearchFlights(c.Request.Context(), params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -61,6 +64,9 @@ func (h *SearchHandler) SearchHotels(c *gin.Context) {
 	if params.PageSize <= 0 {
 		params.PageSize = 10
 	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
 
 	// Validate dates
 	checkIn, err := time.Parse("2006-01-02", params.CheckIn)
@@ -80,7 +86,7 @@ func (h *SearchHandler) SearchHotels(c *gin.Context) {
 
 	hotels, total, err := h.searchService.SearchHotels(c.Request.Context(), params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -102,6 +108,10 @@ func (h *SearchHandler) GetFlight(c *gin.Context) {
 
 	flight, err := h.searchService.GetFlightWithAvailability(c.Request.Context(), flightID)
 	if err != nil {
+		if err.Error() == "flight not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -134,6 +144,10 @@ func (h *SearchHandler) GetHotel(c *gin.Context) {
 
 	hotel, err := h.searchService.GetHotelWithAvailability(c.Request.Context(), hotelID, checkIn, checkOut)
 	if err != nil {
+		if err.Error() == "hotel not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
