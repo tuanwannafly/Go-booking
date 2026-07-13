@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gobooking/internal/domain"
+	"gobooking/internal/repository/postgres"
 	"gobooking/internal/service"
 )
 
@@ -34,11 +36,18 @@ func (h *HoldHandler) HoldSeat(c *gin.Context) {
 	// Override with path parameter
 	req.SeatID = seatID
 
-	holdDuration := time.Duration(req.HoldDuration) * time.Minute
 	unit, err := h.holdService.HoldSeat(c.Request.Context(), req.SeatID, req.HoldDuration)
 	if err != nil {
-		if err.Error() == "inventory unit not available" || err.Error() == "inventory unit not found" {
+		if errors.Is(err, postgres.ErrInventoryNotAvailable) || errors.Is(err, postgres.ErrInventoryNotFound) {
 			c.JSON(http.StatusConflict, gin.H{"error": "seat not available"})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidHoldDuration) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrHoldLockUnavailable) {
+			c.JSON(http.StatusConflict, gin.H{"error": "seat is being held by another request"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -48,7 +57,7 @@ func (h *HoldHandler) HoldSeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"inventory_unit": unit,
 		"held_until":     unit.HeldUntil,
-		"expires_in":     int(holdDuration.Seconds()),
+		"expires_in":     expiresInSeconds(unit.HeldUntil),
 	})
 }
 
@@ -69,11 +78,15 @@ func (h *HoldHandler) HoldRoom(c *gin.Context) {
 
 	unit, err := h.holdService.HoldRoom(c.Request.Context(), req.RoomID, req.HoldDuration)
 	if err != nil {
-		if err.Error() == "inventory unit not available" || err.Error() == "inventory unit not found" {
+		if errors.Is(err, postgres.ErrInventoryNotAvailable) || errors.Is(err, postgres.ErrInventoryNotFound) {
 			c.JSON(http.StatusConflict, gin.H{"error": "room not available"})
 			return
 		}
-		if err.Error() == "max retries exceeded for optimistic lock" {
+		if errors.Is(err, service.ErrInvalidHoldDuration) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, postgres.ErrOptimisticLockConflict) {
 			c.JSON(http.StatusConflict, gin.H{"error": "room temporarily unavailable, please retry"})
 			return
 		}
@@ -81,12 +94,22 @@ func (h *HoldHandler) HoldRoom(c *gin.Context) {
 		return
 	}
 
-	holdDuration := time.Duration(req.HoldDuration) * time.Minute
 	c.JSON(http.StatusOK, gin.H{
 		"inventory_unit": unit,
 		"held_until":     unit.HeldUntil,
-		"expires_in":     int(holdDuration.Seconds()),
+		"expires_in":     expiresInSeconds(unit.HeldUntil),
 	})
+}
+
+func expiresInSeconds(deadline *time.Time) int {
+	if deadline == nil {
+		return 0
+	}
+	remaining := time.Until(*deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	return int(remaining.Round(time.Second).Seconds())
 }
 
 func (h *HoldHandler) ReleaseHold(c *gin.Context) {

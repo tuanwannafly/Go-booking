@@ -108,6 +108,7 @@ type Booking struct {
 	IdempotencyKey string        `json:"idempotency_key,omitempty"`
 	TotalAmount    float64       `json:"total_amount"`
 	ExpiresAt      *time.Time    `json:"expires_at,omitempty"`
+	ScheduledAt    *time.Time    `json:"scheduled_at,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
 	Items          []BookingItem `json:"items,omitempty"`
@@ -157,17 +158,18 @@ type HotelSearchParams struct {
 }
 
 type HoldSeatRequest struct {
-	SeatID       uuid.UUID `json:"seat_id" binding:"required"`
-	HoldDuration int       `json:"hold_duration" binding:"required,min=1,max=60"` // minutes
+	SeatID       uuid.UUID `json:"seat_id,omitempty"`
+	HoldDuration int       `json:"hold_duration,omitempty" binding:"omitempty,min=1,max=60"` // minutes
 }
 
 type HoldRoomRequest struct {
-	RoomID       uuid.UUID `json:"room_id" binding:"required"`
-	HoldDuration int       `json:"hold_duration" binding:"required,min=1,max=60"` // minutes
+	RoomID       uuid.UUID `json:"room_id,omitempty"`
+	HoldDuration int       `json:"hold_duration,omitempty" binding:"omitempty,min=1,max=60"` // minutes
 }
 
 type CreateBookingRequest struct {
-	Items []CreateBookingItem `json:"items" binding:"required,min=1"`
+	Items       []CreateBookingItem `json:"items" binding:"required,min=1"`
+	ScheduledAt *time.Time          `json:"scheduled_at,omitempty"`
 }
 
 type CreateBookingItem struct {
@@ -180,6 +182,13 @@ type ConfirmBookingRequest struct {
 
 type CancelBookingRequest struct {
 	Reason string `json:"reason"`
+}
+
+// ScheduleBookingRequest carries a new scheduled departure/check-in time for a
+// booking. ScheduledAt must be in the future and the booking must belong to a
+// terminal state (cancelled/expired) to be rejected.
+type ScheduleBookingRequest struct {
+	ScheduledAt time.Time `json:"scheduled_at" binding:"required"`
 }
 
 type PaginatedResponse struct {

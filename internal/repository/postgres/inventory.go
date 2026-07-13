@@ -128,7 +128,9 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 	// SELECT FOR UPDATE - pessimistic lock at database level
 	query := `
 		SELECT id, resource_type, resource_id, unit_code, status, held_until, version, created_at, updated_at
-		FROM inventory_units WHERE id = $1 FOR UPDATE
+		FROM inventory_units
+		WHERE id = $1 AND resource_type = 'flight_seat'
+		FOR UPDATE
 	`
 	row := tx.QueryRow(ctx, query, seatID)
 
@@ -146,15 +148,8 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 		unit.HeldUntil = &heldUntil.Time
 	}
 
-	// Check if available
-	if unit.Status != domain.InventoryStatusAvailable {
-		return nil, ErrInventoryNotAvailable
-	}
-
-	// Check if hold has expired
-	if unit.HeldUntil != nil && unit.HeldUntil.Before(time.Now()) {
-		// Expired hold, can be re-held
-	} else if unit.Status == domain.InventoryStatusHeld {
+	if unit.Status != domain.InventoryStatusAvailable &&
+		!(unit.Status == domain.InventoryStatusHeld && unit.HeldUntil != nil && unit.HeldUntil.Before(time.Now())) {
 		return nil, ErrInventoryNotAvailable
 	}
 
@@ -183,6 +178,9 @@ func (r *InventoryRepository) HoldSeatWithPessimisticLock(ctx context.Context, s
 
 // HoldRoomWithOptimisticLock uses optimistic locking for hotel rooms (lower contention)
 func (r *InventoryRepository) HoldRoomWithOptimisticLock(ctx context.Context, roomID uuid.UUID, holdDuration time.Duration, maxRetries int) (*domain.InventoryUnit, error) {
+	if maxRetries < 0 {
+		return nil, fmt.Errorf("max retries must be non-negative")
+	}
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -194,7 +192,13 @@ func (r *InventoryRepository) HoldRoomWithOptimisticLock(ctx context.Context, ro
 		lastErr = err
 		if errors.Is(err, ErrOptimisticLockConflict) {
 			// Retry on version conflict
-			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+			backoff := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				backoff.Stop()
+				return nil, ctx.Err()
+			case <-backoff.C:
+			}
 			continue
 		}
 
@@ -209,7 +213,7 @@ func (r *InventoryRepository) tryHoldRoomOptimistic(ctx context.Context, roomID 
 	// First, get the current version
 	query := `
 		SELECT id, resource_type, resource_id, unit_code, status, held_until, version, created_at, updated_at
-		FROM inventory_units WHERE id = $1
+		FROM inventory_units WHERE id = $1 AND resource_type = 'hotel_room'
 	`
 	row := r.db.QueryRow(ctx, query, roomID)
 
@@ -242,7 +246,7 @@ func (r *InventoryRepository) tryHoldRoomOptimistic(ctx context.Context, roomID 
 	updateQuery := `
 		UPDATE inventory_units
 		SET status = 'held', held_until = $1, version = version + 1, updated_at = NOW()
-		WHERE id = $2 AND version = $3
+		WHERE id = $2 AND resource_type = 'hotel_room' AND version = $3
 	`
 	cmdTag, err := r.db.Exec(ctx, updateQuery, heldUntilTime, roomID, unit.Version)
 	if err != nil {
@@ -278,7 +282,9 @@ func (r *InventoryRepository) ReleaseExpiredHolds(ctx context.Context) (int64, e
 	query := `
 		UPDATE inventory_units
 		SET status = 'available', held_until = NULL, version = version + 1, updated_at = NOW()
-		WHERE status = 'held' AND held_until IS NOT NULL AND held_until < NOW()
+		WHERE status = 'held'
+		  AND held_until IS NOT NULL
+		  AND held_until < NOW()
 	`
 	cmdTag, err := r.db.Exec(ctx, query)
 	if err != nil {

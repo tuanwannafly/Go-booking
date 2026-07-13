@@ -21,9 +21,19 @@ var (
 	ErrBookingNotPending     = errors.New("booking is not in pending status")
 	ErrBookingExpired        = errors.New("booking has expired")
 	ErrIdempotencyConflict   = errors.New("idempotency key conflict: same key with different request")
+	ErrIdempotentReplay      = errors.New("idempotent response replay")
 	ErrInsufficientInventory = errors.New("insufficient inventory for booking")
 	ErrPaymentFailed         = errors.New("payment failed")
+	ErrInvalidScheduleTime   = errors.New("scheduled_at must be in the future")
 )
+
+type IdempotentReplayError struct {
+	Booking *domain.Booking
+}
+
+func (e *IdempotentReplayError) Error() string { return ErrIdempotentReplay.Error() }
+
+func (e *IdempotentReplayError) Unwrap() error { return ErrIdempotentReplay }
 
 type BookingService struct {
 	bookingRepo     *postgres.BookingRepository
@@ -67,16 +77,21 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 		requestHash := s.computeRequestHash(req)
 		existing, err := s.idempotencyRepo.Get(ctx, idempotencyKey)
 		if err == nil {
-			// Key exists, check if same request
 			if existing.RequestHash != requestHash {
 				return nil, ErrIdempotencyConflict
 			}
-			// Return cached response
-			// In a real implementation, you'd unmarshal the response body
-			// For now, we'll just return an error indicating idempotent response
-			return nil, fmt.Errorf("idempotent response cached")
+			if existing.Status == "completed" {
+				booking, decodeErr := decodeCachedBooking(existing.ResponseBody)
+				if decodeErr != nil {
+					return nil, decodeErr
+				}
+				return booking, &IdempotentReplayError{Booking: booking}
+			}
+			if existing.Status == "processing" {
+				return s.waitForIdempotencyCompletion(ctx, idempotencyKey, requestHash)
+			}
 		}
-		if !errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
+		if err != nil && !errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
 			return nil, err
 		}
 
@@ -89,6 +104,9 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 			CreatedAt:    time.Now(),
 			ExpiresAt:    time.Now().Add(24 * time.Hour),
 		}); err != nil {
+			if errors.Is(err, postgres.ErrIdempotencyKeyConflict) {
+				return s.waitForIdempotencyCompletion(ctx, idempotencyKey, requestHash)
+			}
 			return nil, err
 		}
 	}
@@ -137,6 +155,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 		IdempotencyKey: idempotencyKey,
 		TotalAmount:    totalAmount,
 		ExpiresAt:      ptr(time.Now().Add(s.bookingExpiry)),
+		ScheduledAt:    req.ScheduledAt,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
@@ -162,15 +181,10 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 
 	// Save idempotency response
 	if idempotencyKey != "" {
-		responseBody := map[string]interface{}{
-			"booking_id": booking.ID,
-			"status":     booking.Status,
-			"total":      booking.TotalAmount,
-		}
 		if err := s.idempotencyRepo.Update(ctx, &domain.IdempotencyKey{
 			Key:          idempotencyKey,
 			RequestHash:  s.computeRequestHash(req),
-			ResponseBody: mustJSON(responseBody),
+			ResponseBody: mustJSON(booking),
 			Status:       "completed",
 			CreatedAt:    time.Now(),
 			ExpiresAt:    time.Now().Add(24 * time.Hour),
@@ -195,6 +209,9 @@ func (s *BookingService) GetUserBookings(ctx context.Context, userID uuid.UUID, 
 }
 
 func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID, req domain.ConfirmBookingRequest) (*domain.Booking, error) {
+	if req.PaymentMethod == "" {
+		return nil, errors.New("payment method is required")
+	}
 	booking, err := s.bookingRepo.GetByIDWithItems(ctx, bookingID)
 	if err != nil {
 		return nil, err
@@ -204,6 +221,9 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 	}
 
 	if booking.Status != domain.BookingStatusPending {
+		if booking.Status == domain.BookingStatusConfirmed {
+			return booking, &IdempotentReplayError{Booking: booking}
+		}
 		return nil, ErrBookingNotPending
 	}
 
@@ -212,17 +232,6 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 		// Expire the booking
 		s.expireBooking(ctx, booking)
 		return nil, ErrBookingExpired
-	}
-
-	// Get inventory unit IDs
-	inventoryUnitIDs := make([]uuid.UUID, len(booking.Items))
-	for i, item := range booking.Items {
-		inventoryUnitIDs[i] = item.InventoryUnitID
-	}
-
-	// Confirm inventory (held -> booked)
-	if err := s.inventoryRepo.ConfirmBooking(ctx, inventoryUnitIDs); err != nil {
-		return nil, err
 	}
 
 	// Create mock payment
@@ -235,12 +244,7 @@ func (s *BookingService) ConfirmBooking(ctx context.Context, bookingID uuid.UUID
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	if err := s.paymentRepo.Create(ctx, payment); err != nil {
-		return nil, err
-	}
-
-	// Update booking status
-	if err := s.bookingRepo.UpdateStatus(ctx, bookingID, domain.BookingStatusConfirmed); err != nil {
+	if err := s.bookingRepo.Confirm(ctx, bookingID, payment); err != nil {
 		return nil, err
 	}
 
@@ -343,6 +347,39 @@ func (s *BookingService) expireBooking(ctx context.Context, booking *domain.Book
 	return s.bookingRepo.UpdateStatus(ctx, booking.ID, domain.BookingStatusExpired)
 }
 
+// ScheduleBooking records or updates the departure/check-in time of a booking.
+// It rejects past times, bookings that have already been finalized, and attempts
+// to reschedule a booking past its payment-expiry window.
+func (s *BookingService) ScheduleBooking(ctx context.Context, bookingID uuid.UUID, req domain.ScheduleBookingRequest) (*domain.Booking, error) {
+	if req.ScheduledAt.IsZero() {
+		return nil, ErrInvalidScheduleTime
+	}
+	if !req.ScheduledAt.After(time.Now()) {
+		return nil, ErrInvalidScheduleTime
+	}
+
+	booking, err := s.bookingRepo.GetByIDWithItems(ctx, bookingID)
+	if err != nil {
+		return nil, err
+	}
+	if booking == nil {
+		return nil, ErrBookingNotFound
+	}
+
+	switch booking.Status {
+	case domain.BookingStatusCancelled, domain.BookingStatusExpired:
+		return nil, ErrBookingNotPending
+	}
+
+	if err := s.bookingRepo.UpdateScheduledAt(ctx, bookingID, &req.ScheduledAt); err != nil {
+		return nil, err
+	}
+
+	booking.ScheduledAt = &req.ScheduledAt
+	booking.UpdatedAt = time.Now()
+	return booking, nil
+}
+
 func (s *BookingService) calculateRefund(booking *domain.Booking) float64 {
 	hoursUntilDeparture := 24.0 // placeholder - in real implementation, calculate from flight/hotel time
 
@@ -355,10 +392,51 @@ func (s *BookingService) calculateRefund(booking *domain.Booking) float64 {
 }
 
 func (s *BookingService) computeRequestHash(req domain.CreateBookingRequest) string {
-	// Simple hash of request - in production use proper serialization
-	data := fmt.Sprintf("%v", req.Items)
-	hash := sha256.Sum256([]byte(data))
+	data := mustJSON(req)
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
+}
+
+func (s *BookingService) waitForIdempotencyCompletion(ctx context.Context, key, requestHash string) (*domain.Booking, error) {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			record, err := s.idempotencyRepo.Get(ctx, key)
+			if err != nil {
+				if errors.Is(err, postgres.ErrIdempotencyKeyNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			if record.RequestHash != requestHash {
+				return nil, ErrIdempotencyConflict
+			}
+			if record.Status == "completed" {
+				booking, err := decodeCachedBooking(record.ResponseBody)
+				if err != nil {
+					return nil, err
+				}
+				return booking, &IdempotentReplayError{Booking: booking}
+			}
+		case <-deadline.C:
+			return nil, fmt.Errorf("idempotency request still processing")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func decodeCachedBooking(data []byte) (*domain.Booking, error) {
+	var booking domain.Booking
+	if err := json.Unmarshal(data, &booking); err != nil {
+		return nil, fmt.Errorf("decode cached booking: %w", err)
+	}
+	return &booking, nil
 }
 
 func ptr[T any](v T) *T {

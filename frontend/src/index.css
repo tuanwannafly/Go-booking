@@ -1,0 +1,220 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role='button'][aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply bg-canvasSoft text-ink placeholder:text-mute;
+  }
+
+  ::selection {
+    background-color: #000;
+    color: #fff;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-container px-4 md:px-6 lg:px-8;
+  }
+
+  .display-xxl {
+    @apply font-display font-bold text-[40px] leading-[48px] md:text-[52px] md:leading-[64px] tracking-tighter;
+  }
+
+  .display-xl {
+    @apply font-display font-bold text-[30px] leading-[38px] md:text-[36px] md:leading-[44px] tracking-tighter;
+  }
+
+  .display-lg {
+    @apply font-display font-bold text-[26px] leading-[34px] md:text-[32px] md:leading-[40px] tracking-tighter;
+  }
+
+  .display-md {
+    @apply font-display font-bold text-[20px] leading-[28px] md:text-[24px] md:leading-[32px];
+  }
+
+  .display-sm {
+    @apply font-display font-bold text-[18px] leading-[26px] md:text-[20px] md:leading-[28px];
+  }
+
+  .body-lg {
+    @apply font-sans text-[18px] font-medium leading-[24px];
+  }
+
+  .body-md {
+    @apply font-sans text-[16px] font-normal leading-[24px];
+  }
+
+  .body-md-strong {
+    @apply font-sans text-[16px] font-medium leading-[20px];
+  }
+
+  .body-sm {
+    @apply font-sans text-[14px] font-normal leading-[20px];
+  }
+
+  .body-sm-strong {
+    @apply font-sans text-[14px] font-medium leading-[16px];
+  }
+
+  .caption {
+    @apply font-sans text-[12px] font-normal leading-[20px];
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-ink text-onPrimary px-6 py-3 body-md-strong transition-colors hover:bg-blackElevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:bg-surfacePressed disabled:text-mute;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-canvas text-ink px-6 py-3 body-md-strong border border-ink/10 transition-colors hover:bg-canvasSoft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:text-mute;
+  }
+
+  .btn-subtle {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-canvasSoft text-ink px-6 py-3 body-md-strong transition-colors hover:bg-surfacePressed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:text-mute;
+  }
+
+  .btn-floating {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-canvas text-ink px-6 py-3 body-md-strong shadow-l3 transition-shadow hover:shadow-l1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink;
+  }
+
+  .btn-large-rounded {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-ink text-onPrimary px-8 py-5 text-[18px] font-medium leading-[24px] transition-colors hover:bg-blackElevated;
+  }
+
+  .btn-tab-translucent {
+    @apply inline-flex items-center justify-center gap-2 rounded-pillTab bg-canvas text-ink px-5 py-2 body-md-strong transition-colors hover:bg-canvasSoft;
+  }
+
+  .icon-button-circular {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-full bg-canvasSoft text-ink hover:bg-surfacePressed ring-focus;
+  }
+
+  .app-pill {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-ink text-onPrimary px-5 py-3 body-md-strong transition-colors hover:bg-blackElevated;
+  }
+
+  .category-pill {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-canvasSoft text-ink px-4 py-2 body-sm-strong transition-colors hover:bg-surfacePressed;
+  }
+
+  .category-pill-active {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-ink text-onPrimary px-4 py-2 body-sm-strong;
+  }
+
+  .card {
+    @apply rounded-xl bg-canvas text-ink;
+  }
+
+  .card-elevated {
+    @apply rounded-xl bg-canvas text-ink shadow-l1;
+  }
+
+  .card-soft {
+    @apply rounded-xl bg-canvasSoft text-ink;
+  }
+
+  .card-content {
+    @apply rounded-xl bg-canvas p-6 md:p-8 text-ink;
+  }
+
+  .promo-light {
+    @apply rounded-xl bg-canvas p-6 md:p-8 text-ink;
+  }
+
+  .promo-dark {
+    @apply rounded-xl bg-ink p-6 md:p-8 text-onPrimary;
+  }
+
+  .request-form-card {
+    @apply rounded-xl bg-canvas text-ink shadow-l2;
+  }
+
+  .request-form-row {
+    @apply bg-canvasSoft text-ink rounded-md px-4 py-3 flex items-center gap-3 transition-colors focus-within:ring-2 focus-within:ring-ink;
+  }
+
+  .input {
+    @apply w-full bg-canvasSoft text-ink placeholder:text-mute rounded-md px-4 py-3 body-md focus:outline-none focus:ring-2 focus:ring-ink transition-shadow;
+  }
+
+  .input-soft {
+    @apply w-full bg-canvasSofter text-ink placeholder:text-mute rounded-md px-4 py-3 body-md focus:outline-none focus:ring-2 focus:ring-ink transition-shadow;
+  }
+
+  .nav-link {
+    @apply body-md-strong text-ink hover:text-body transition-colors;
+  }
+
+  .link-blue {
+    @apply body-md text-link underline-offset-2 hover:underline;
+  }
+
+  .link-on-dark {
+    @apply body-md text-onPrimary underline-offset-2 hover:underline;
+  }
+
+  .link-mute {
+    @apply body-md text-hairlineMid hover:text-onPrimary transition-colors;
+  }
+
+  .h-divider {
+    @apply w-full h-px bg-surfacePressed;
+  }
+
+  .ring-focus {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-canvas;
+  }
+}
+
+/* Fade page transitions */
+.page-enter {
+  animation: pageFade 240ms ease both;
+}
+
+@keyframes pageFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scrollbar polish */
+.thin-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #cfcfcf;
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

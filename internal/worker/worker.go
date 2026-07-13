@@ -2,12 +2,15 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrInvalidInterval = errors.New("worker interval must be greater than zero")
 
 type Worker interface {
 	Start(ctx context.Context) error
@@ -16,10 +19,12 @@ type Worker interface {
 }
 
 type WorkerService struct {
-	workers []Worker
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cancel  context.CancelFunc
+	workers   []Worker
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewWorkerService(workers ...Worker) *WorkerService {
@@ -32,21 +37,36 @@ func NewWorkerService(workers ...Worker) *WorkerService {
 }
 
 func (s *WorkerService) Start(ctx context.Context) error {
-	for _, w := range s.workers {
-		s.wg.Add(1)
-		go func(worker Worker) {
-			defer s.wg.Done()
-			if err := worker.Start(s.ctx); err != nil {
-				fmt.Printf("Worker %s error: %v\n", worker.Name(), err)
-			}
-		}(w)
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	s.startOnce.Do(func() {
+		s.ctx, s.cancel = context.WithCancel(ctx)
+		for _, w := range s.workers {
+			s.wg.Add(1)
+			go func(worker Worker) {
+				defer s.wg.Done()
+				if err := worker.Start(s.ctx); err != nil && !errors.Is(err, context.Canceled) {
+					fmt.Printf("Worker %s error: %v\n", worker.Name(), err)
+				}
+			}(w)
+		}
+	})
 	return nil
 }
 
 func (s *WorkerService) Stop() error {
-	s.cancel()
-	s.wg.Wait()
+	s.stopOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		for _, w := range s.workers {
+			if err := w.Stop(); err != nil {
+				fmt.Printf("Worker %s shutdown error: %v\n", w.Name(), err)
+			}
+		}
+		s.wg.Wait()
+	})
 	return nil
 }
 
@@ -56,6 +76,7 @@ type HoldReleaseWorker struct {
 	interval time.Duration
 	ticker   *time.Ticker
 	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func NewHoldReleaseWorker(db *pgxpool.Pool, interval time.Duration) *HoldReleaseWorker {
@@ -71,8 +92,12 @@ func (w *HoldReleaseWorker) Name() string {
 }
 
 func (w *HoldReleaseWorker) Start(ctx context.Context) error {
+	if w.interval <= 0 {
+		return ErrInvalidInterval
+	}
 	w.ticker = time.NewTicker(w.interval)
 	defer w.ticker.Stop()
+	w.releaseExpiredHolds(ctx)
 
 	for {
 		select {
@@ -87,11 +112,14 @@ func (w *HoldReleaseWorker) Start(ctx context.Context) error {
 }
 
 func (w *HoldReleaseWorker) Stop() error {
-	close(w.stopCh)
+	w.stopOnce.Do(func() { close(w.stopCh) })
 	return nil
 }
 
 func (w *HoldReleaseWorker) releaseExpiredHolds(ctx context.Context) {
+	if w.db == nil {
+		return
+	}
 	query := `
 		UPDATE inventory_units
 		SET status = 'available', held_until = NULL, version = version + 1, updated_at = NOW()
@@ -115,6 +143,7 @@ type BookingExpireWorker struct {
 	interval time.Duration
 	ticker   *time.Ticker
 	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func NewBookingExpireWorker(db *pgxpool.Pool, interval time.Duration) *BookingExpireWorker {
@@ -130,6 +159,9 @@ func (w *BookingExpireWorker) Name() string {
 }
 
 func (w *BookingExpireWorker) Start(ctx context.Context) error {
+	if w.interval <= 0 {
+		return ErrInvalidInterval
+	}
 	w.ticker = time.NewTicker(w.interval)
 	defer w.ticker.Stop()
 
@@ -146,7 +178,7 @@ func (w *BookingExpireWorker) Start(ctx context.Context) error {
 }
 
 func (w *BookingExpireWorker) Stop() error {
-	close(w.stopCh)
+	w.stopOnce.Do(func() { close(w.stopCh) })
 	return nil
 }
 
@@ -268,6 +300,7 @@ type IdempotencyCleanupWorker struct {
 	interval time.Duration
 	ticker   *time.Ticker
 	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func NewIdempotencyCleanupWorker(db *pgxpool.Pool, interval time.Duration) *IdempotencyCleanupWorker {
@@ -283,6 +316,9 @@ func (w *IdempotencyCleanupWorker) Name() string {
 }
 
 func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
+	if w.interval <= 0 {
+		return ErrInvalidInterval
+	}
 	w.ticker = time.NewTicker(w.interval)
 	defer w.ticker.Stop()
 
@@ -299,7 +335,7 @@ func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 }
 
 func (w *IdempotencyCleanupWorker) Stop() error {
-	close(w.stopCh)
+	w.stopOnce.Do(func() { close(w.stopCh) })
 	return nil
 }
 

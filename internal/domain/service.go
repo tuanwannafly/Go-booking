@@ -23,6 +23,7 @@ type BookingService interface {
 	GetUserBookings(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]Booking, int64, error)
 	ConfirmBooking(ctx context.Context, bookingID uuid.UUID, req ConfirmBookingRequest) (*Booking, error)
 	CancelBooking(ctx context.Context, bookingID uuid.UUID, req CancelBookingRequest) (*Booking, error)
+	ScheduleBooking(ctx context.Context, bookingID uuid.UUID, req ScheduleBookingRequest) (*Booking, error)
 }
 
 type WorkerService interface {

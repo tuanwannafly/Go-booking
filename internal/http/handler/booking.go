@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -37,17 +38,22 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 
 	booking, err := h.bookingService.CreateBooking(c.Request.Context(), userID.(uuid.UUID), req, idempotencyKey)
 	if err != nil {
-		if err.Error() == "idempotency key conflict: different request body" {
+		var replay *service.IdempotentReplayError
+		if errors.As(err, &replay) {
+			c.Header("X-Idempotency-Replayed", "true")
+			c.JSON(http.StatusOK, replay.Booking)
+			return
+		}
+		if errors.Is(err, service.ErrIdempotencyConflict) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Idempotency-Key conflict: different request body"})
+			return
+		}
+		if errors.Is(err, service.ErrUserNotFound) || errors.Is(err, service.ErrInsufficientInventory) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Check if this was a cached response
-	if cached, ok := c.Get("idempotency_cached"); ok && cached == true {
-		c.Header("X-Idempotency-Cached", "true")
 	}
 
 	c.JSON(http.StatusCreated, booking)
@@ -138,11 +144,17 @@ func (h *BookingHandler) ConfirmBooking(c *gin.Context) {
 
 	booking, err := h.bookingService.ConfirmBooking(c.Request.Context(), bookingID, req)
 	if err != nil {
-		if err.Error() == "booking not found" {
+		var replay *service.IdempotentReplayError
+		if errors.As(err, &replay) {
+			c.Header("X-Booking-Replayed", "true")
+			c.JSON(http.StatusOK, replay.Booking)
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
 			return
 		}
-		if err.Error() == "booking is not in pending status" {
+		if errors.Is(err, service.ErrBookingNotPending) {
 			c.JSON(http.StatusConflict, gin.H{"error": "booking cannot be confirmed"})
 			return
 		}
@@ -189,45 +201,47 @@ func (h *BookingHandler) CancelBooking(c *gin.Context) {
 	c.JSON(http.StatusOK, booking)
 }
 
-// IdempotencyMiddleware handles idempotency key processing
-func IdempotencyMiddleware(bookingService *service.BookingService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Only apply to mutating methods
-		if c.Request.Method == "GET" || c.Request.Method == "HEAD" || c.Request.Method == "OPTIONS" {
-			c.Next()
-			return
-		}
-
-		idempotencyKey := c.GetHeader("Idempotency-Key")
-		if idempotencyKey == "" {
-			c.Next()
-			return
-		}
-
-		// Read and store request body for hash comparison
-		body, err := c.GetRawData()
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-			return
-		}
-
-		// Check if key exists
-		existingBooking, err := bookingService.GetBookingByIdempotencyKey(c.Request.Context(), idempotencyKey)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
-
-		_ = existingBooking
-
-		// Store body for later use
-		c.Set("idempotency_key", idempotencyKey)
-		c.Set("idempotency_body", body)
-		c.Next()
+func (h *BookingHandler) ScheduleBooking(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
 	}
-}
 
-func computeRequestHash(body []byte) string {
-	// Simple hash - in production use proper serialization
-	return string(body) // placeholder
+	bookingID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking ID"})
+		return
+	}
+
+	var req domain.ScheduleBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	booking, err := h.bookingService.ScheduleBooking(c.Request.Context(), bookingID, req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidScheduleTime) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotPending) {
+			c.JSON(http.StatusConflict, gin.H{"error": "booking cannot be rescheduled in its current state"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if booking.UserID != userID.(uuid.UUID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to schedule this booking"})
+		return
+	}
+
+	c.JSON(http.StatusOK, booking)
 }
