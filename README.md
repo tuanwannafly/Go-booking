@@ -2,7 +2,7 @@
 
 A production-ready Go service demonstrating **concurrency-safe booking**, **idempotency**, and **distributed locking** — built for a Backend Golang Intern portfolio.
 
-## 🎯 Project Goals
+##  Project Goals
 
 - **Anti-overbooking**: Pessimistic lock (Redis + `SELECT FOR UPDATE`) for flight seats; Optimistic lock (version column) for hotel rooms
 - **Idempotency**: `Idempotency-Key` header prevents double-charge on retry
@@ -10,7 +10,7 @@ A production-ready Go service demonstrating **concurrency-safe booking**, **idem
 - **Clean architecture**: Handler → Service → Repository → DB/Redis
 - **Observable**: Structured logging, health checks, OpenAPI docs
 
-## 🏗 Architecture
+##  Architecture
 
 ```
 HTTP Handler → Service (Use Case) → Repository → PostgreSQL / Redis
@@ -22,7 +22,7 @@ HTTP Handler → Service (Use Case) → Repository → PostgreSQL / Redis
 | Flight Seat | Pessimistic (Redis lock + `SELECT FOR UPDATE`) | Burst contention during flash sales |
 | Hotel Room | Optimistic (`version` column + retry) | Contention spread over days, lower peak |
 
-## 🛠 Tech Stack
+##  Tech Stack
 
 | Layer | Technology |
 |-------|------------|
@@ -36,7 +36,7 @@ HTTP Handler → Service (Use Case) → Repository → PostgreSQL / Redis
 | CI | GitHub Actions |
 | Docs | Swaggo (OpenAPI 3) |
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 gobooking/
@@ -63,7 +63,7 @@ gobooking/
 └── README.md
 ```
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
@@ -73,8 +73,8 @@ gobooking/
 
 ```bash
 # Clone and start
-git clone <repo>
-cd gobooking
+git clone https://github.com/tuanwannafly/Go-booking.git
+cd Go-booking
 docker compose up --build
 
 # API available at http://localhost:8080
@@ -111,7 +111,7 @@ go run ./cmd/api
 | `LOG_LEVEL` | debug | Log level |
 | `SERVER_PORT` | 8080 | HTTP port |
 
-## 📡 API Endpoints
+##  API Endpoints
 
 | Method | Path | Auth | Idempotent | Description |
 |--------|------|------|------------|-------------|
@@ -120,7 +120,7 @@ go run ./cmd/api
 | GET | `/hotels/search` | - | - | Search hotels |
 | POST | `/flights/{id}/seats/{seatId}/hold` | User | - | Hold seat (pessimistic) |
 | POST | `/hotels/rooms/{roomId}/hold` | User | - | Hold room (optimistic) |
-| POST | `/bookings` | User | ✅ `Idempotency-Key` | Create booking |
+| POST | `/bookings` | User |  `Idempotency-Key` | Create booking |
 | POST | `/bookings/{id}/confirm` | User | - | Confirm + mock payment |
 | POST | `/bookings/{id}/cancel` | User | - | Cancel + refund calc |
 | POST | `/bookings/{id}/schedule` | User | - | Reschedule booking (set `scheduled_at`) |
@@ -182,7 +182,7 @@ curl -X POST http://localhost:8080/bookings/{bookingId}/schedule \
   -d '{"scheduled_at":"2026-09-16T08:00:00Z"}'
 ```
 
-## 🧪 Testing
+##  Testing
 
 ### Run All Tests (with Race Detector)
 ```bash
@@ -211,7 +211,7 @@ and the single version increment.
 go test -v ./test/integration/...
 ```
 
-## 📊 Database Schema (Core Tables)
+##  Database Schema (Core Tables)
 
 ```sql
 -- Core locking table
@@ -248,14 +248,14 @@ bookings (
 )
 ```
 
-## 🏃 Background Workers
+##  Background Workers
 
 | Worker | Interval | Action |
 |--------|----------|--------|
 | HoldReleaseWorker | 30s | `status=held AND held_until < NOW() → available` |
 | BookingExpireWorker | 60s | `status=pending AND expires_at < NOW() → expired + release inventory` |
 
-## 📝 API Documentation
+##  API Documentation
 
 Swagger UI available at `http://localhost:8080/swagger/index.html` after running the server.
 
@@ -265,14 +265,14 @@ go install github.com/swaggo/swag/cmd/swag@latest
 swag init -g cmd/api/main.go -o docs
 ```
 
-## 🔧 CI/CD Pipeline
+##  CI/CD Pipeline
 
 GitHub Actions (`.github/workflows/ci.yml`):
 1. **Lint**: `golangci-lint`
 2. **Test**: `go vet`, `go test -race -cover ./...`
 3. **Build**: `docker build -t gobooking:ci .`
 
-## 🎓 Interview Talking Points
+##  Interview Talking Points
 
 1. **Pessimistic vs Optimistic Locking**
    - Flight seats: Redis distributed lock + `SELECT FOR UPDATE` (serializable isolation)
@@ -302,13 +302,13 @@ GitHub Actions (`.github/workflows/ci.yml`):
    - Repositories abstract DB (swappable, mockable)
    - Domain entities have no external deps
 
-## 📈 Stretch Goals (Sprint 5)
+##  Stretch Goals (Sprint 5)
 
 - [ ] Prometheus metrics (`/metrics`) + Grafana dashboard
 - [ ] JWT auth with roles (admin/user)
 - [ ] k6 load test simulating flash sale
 - [ ] Circuit breaker for payment provider
 
-## 📄 License
+##  License
 
 MIT — use freely for learning/portfolio.
