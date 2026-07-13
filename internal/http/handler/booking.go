@@ -200,3 +200,48 @@ func (h *BookingHandler) CancelBooking(c *gin.Context) {
 
 	c.JSON(http.StatusOK, booking)
 }
+
+func (h *BookingHandler) ScheduleBooking(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	bookingID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid booking ID"})
+		return
+	}
+
+	var req domain.ScheduleBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	booking, err := h.bookingService.ScheduleBooking(c.Request.Context(), bookingID, req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidScheduleTime) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "booking not found"})
+			return
+		}
+		if errors.Is(err, service.ErrBookingNotPending) {
+			c.JSON(http.StatusConflict, gin.H{"error": "booking cannot be rescheduled in its current state"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if booking.UserID != userID.(uuid.UUID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to schedule this booking"})
+		return
+	}
+
+	c.JSON(http.StatusOK, booking)
+}

@@ -123,6 +123,7 @@ go run ./cmd/api
 | POST | `/bookings` | User | ✅ `Idempotency-Key` | Create booking |
 | POST | `/bookings/{id}/confirm` | User | - | Confirm + mock payment |
 | POST | `/bookings/{id}/cancel` | User | - | Cancel + refund calc |
+| POST | `/bookings/{id}/schedule` | User | - | Reschedule booking (set `scheduled_at`) |
 | GET | `/bookings/{id}` | User | - | Get booking details |
 | GET | `/swagger/index.html` | - | - | API docs |
 
@@ -160,6 +161,25 @@ curl -X POST http://localhost:8080/bookings/{bookingId}/confirm \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"payment_method":"mock"}'
+```
+
+**Schedule a Booking** (set or update the actual travel date)
+```bash
+# Provide scheduled_at during booking creation
+curl -X POST http://localhost:8080/bookings \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: unique-key-123" \
+  -d '{
+        "items":[{"inventory_unit_id":"<held-seat-id>"}],
+        "scheduled_at":"2026-09-15T08:00:00Z"
+      }'
+
+# Or reschedule an existing booking
+curl -X POST http://localhost:8080/bookings/{bookingId}/schedule \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"scheduled_at":"2026-09-16T08:00:00Z"}'
 ```
 
 ## 🧪 Testing
@@ -212,6 +232,19 @@ idempotency_keys (
   response_body JSONB,
   status VARCHAR(20),
   expires_at TIMESTAMPTZ
+)
+
+-- Bookings (scheduled_at = real travel date, separate from expires_at = payment window)
+bookings (
+  id UUID PK,
+  user_id UUID,
+  status booking_status,  -- pending | confirmed | cancelled | expired
+  idempotency_key VARCHAR(255) UNIQUE,
+  total_amount DECIMAL(12,2),
+  expires_at TIMESTAMPTZ,  -- when pending payment auto-expires
+  scheduled_at TIMESTAMPTZ,-- real travel date (reschedulable)
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
 )
 ```
 

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bufio"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,22 +19,22 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Env       string
-	LogLevel  string
-	Timezone  string
-	JWTSecret string
+	Env       string `mapstructure:"env"`
+	LogLevel  string `mapstructure:"log_level"`
+	Timezone  string `mapstructure:"timezone"`
+	JWTSecret string `mapstructure:"jwt_secret"`
 }
 
 type PostgresConfig struct {
-	Host            string
-	Port            int
-	User            string
-	Password        string
-	Database        string
-	SSLMode         string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
+	Host            string        `mapstructure:"host"`
+	Port            int           `mapstructure:"port"`
+	User            string        `mapstructure:"user"`
+	Password        string        `mapstructure:"password"`
+	Database        string        `mapstructure:"database"`
+	SSLMode         string        `mapstructure:"sslmode"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 }
 
 func (c *PostgresConfig) DSN() string {
@@ -40,34 +42,28 @@ func (c *PostgresConfig) DSN() string {
 }
 
 type RedisConfig struct {
-	Host     string
-	Port     int
-	Password string
-	DB       int
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
 }
 
 type ServerConfig struct {
-	Host         string
-	Port         int
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	Host         string        `mapstructure:"host"`
+	Port         int           `mapstructure:"port"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
 }
 
 type WorkerConfig struct {
-	HoldReleaseInterval   time.Duration
-	BookingExpireInterval time.Duration
-	HoldDurationMinutes   int
-	BookingExpireMinutes  int
+	HoldReleaseInterval   time.Duration `mapstructure:"hold_release_interval"`
+	BookingExpireInterval time.Duration `mapstructure:"booking_expire_interval"`
+	HoldDurationMinutes   int           `mapstructure:"hold_duration_minutes"`
+	BookingExpireMinutes  int           `mapstructure:"booking_expire_minutes"`
 }
 
 func Load() (*Config, error) {
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(".")
-	viper.AddConfigPath("./config")
-	viper.AddConfigPath("/etc/gobooking")
-
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	bindEnv("app.env", "APP_ENV")
@@ -96,10 +92,8 @@ func Load() (*Config, error) {
 
 	setDefaults()
 
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, err
-		}
+	if err := loadDotEnv(".env"); err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
 
 	var cfg Config
@@ -108,6 +102,37 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// loadDotEnv reads a .env file and exports each key into the process
+// environment so viper's BindEnv bindings (DB_USER -> postgres.user, etc.)
+// resolve correctly. Process env vars already set take precedence.
+func loadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		val = strings.Trim(val, `"'`)
+
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, val)
+		}
+	}
+	return scanner.Err()
 }
 
 func bindEnv(key, env string) {

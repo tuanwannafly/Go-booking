@@ -24,6 +24,7 @@ var (
 	ErrIdempotentReplay      = errors.New("idempotent response replay")
 	ErrInsufficientInventory = errors.New("insufficient inventory for booking")
 	ErrPaymentFailed         = errors.New("payment failed")
+	ErrInvalidScheduleTime   = errors.New("scheduled_at must be in the future")
 )
 
 type IdempotentReplayError struct {
@@ -154,6 +155,7 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 		IdempotencyKey: idempotencyKey,
 		TotalAmount:    totalAmount,
 		ExpiresAt:      ptr(time.Now().Add(s.bookingExpiry)),
+		ScheduledAt:    req.ScheduledAt,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
@@ -343,6 +345,39 @@ func (s *BookingService) expireBooking(ctx context.Context, booking *domain.Book
 	}
 
 	return s.bookingRepo.UpdateStatus(ctx, booking.ID, domain.BookingStatusExpired)
+}
+
+// ScheduleBooking records or updates the departure/check-in time of a booking.
+// It rejects past times, bookings that have already been finalized, and attempts
+// to reschedule a booking past its payment-expiry window.
+func (s *BookingService) ScheduleBooking(ctx context.Context, bookingID uuid.UUID, req domain.ScheduleBookingRequest) (*domain.Booking, error) {
+	if req.ScheduledAt.IsZero() {
+		return nil, ErrInvalidScheduleTime
+	}
+	if !req.ScheduledAt.After(time.Now()) {
+		return nil, ErrInvalidScheduleTime
+	}
+
+	booking, err := s.bookingRepo.GetByIDWithItems(ctx, bookingID)
+	if err != nil {
+		return nil, err
+	}
+	if booking == nil {
+		return nil, ErrBookingNotFound
+	}
+
+	switch booking.Status {
+	case domain.BookingStatusCancelled, domain.BookingStatusExpired:
+		return nil, ErrBookingNotPending
+	}
+
+	if err := s.bookingRepo.UpdateScheduledAt(ctx, bookingID, &req.ScheduledAt); err != nil {
+		return nil, err
+	}
+
+	booking.ScheduledAt = &req.ScheduledAt
+	booking.UpdatedAt = time.Now()
+	return booking, nil
 }
 
 func (s *BookingService) calculateRefund(booking *domain.Booking) float64 {

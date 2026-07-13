@@ -29,23 +29,24 @@ func NewBookingRepository(db *pgxpool.Pool) *BookingRepository {
 
 func (r *BookingRepository) Create(ctx context.Context, booking *domain.Booking) error {
 	query := `
-		INSERT INTO bookings (id, user_id, status, idempotency_key, total_amount, expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO bookings (id, user_id, status, idempotency_key, total_amount, expires_at, scheduled_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
-	_, err := r.db.Exec(ctx, query, booking.ID, booking.UserID, booking.Status, booking.IdempotencyKey, booking.TotalAmount, booking.ExpiresAt, booking.CreatedAt, booking.UpdatedAt)
+	_, err := r.db.Exec(ctx, query, booking.ID, booking.UserID, booking.Status, booking.IdempotencyKey, booking.TotalAmount, booking.ExpiresAt, booking.ScheduledAt, booking.CreatedAt, booking.UpdatedAt)
 	return err
 }
 
 func (r *BookingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Booking, error) {
 	query := `
-		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, created_at, updated_at
+		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, scheduled_at, created_at, updated_at
 		FROM bookings WHERE id = $1
 	`
 	row := r.db.QueryRow(ctx, query, id)
 
 	var booking domain.Booking
 	var expiresAt sql.NullTime
-	err := row.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &booking.CreatedAt, &booking.UpdatedAt)
+	var scheduledAt sql.NullTime
+	err := row.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &scheduledAt, &booking.CreatedAt, &booking.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -55,6 +56,9 @@ func (r *BookingRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 
 	if expiresAt.Valid {
 		booking.ExpiresAt = &expiresAt.Time
+	}
+	if scheduledAt.Valid {
+		booking.ScheduledAt = &scheduledAt.Time
 	}
 
 	return &booking, nil
@@ -90,7 +94,7 @@ func (r *BookingRepository) GetByUserID(ctx context.Context, userID uuid.UUID, p
 	}
 
 	query := `
-		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, created_at, updated_at
+		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, scheduled_at, created_at, updated_at
 		FROM bookings WHERE user_id = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
@@ -105,12 +109,16 @@ func (r *BookingRepository) GetByUserID(ctx context.Context, userID uuid.UUID, p
 	for rows.Next() {
 		var booking domain.Booking
 		var expiresAt sql.NullTime
-		err := rows.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &booking.CreatedAt, &booking.UpdatedAt)
+		var scheduledAt sql.NullTime
+		err := rows.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &scheduledAt, &booking.CreatedAt, &booking.UpdatedAt)
 		if err != nil {
 			return nil, 0, err
 		}
 		if expiresAt.Valid {
 			booking.ExpiresAt = &expiresAt.Time
+		}
+		if scheduledAt.Valid {
+			booking.ScheduledAt = &scheduledAt.Time
 		}
 		bookings = append(bookings, booking)
 	}
@@ -128,6 +136,11 @@ func (r *BookingRepository) UpdateStatus(ctx context.Context, id uuid.UUID, stat
 		return ErrBookingNotFound
 	}
 	return nil
+}
+
+func (r *BookingRepository) UpdateScheduledAt(ctx context.Context, id uuid.UUID, scheduledAt *time.Time) error {
+	_, err := r.db.Exec(ctx, `UPDATE bookings SET scheduled_at = $1, updated_at = NOW() WHERE id = $2`, scheduledAt, id)
+	return err
 }
 
 // Confirm atomically transitions the booking, inventory and mock payment.
@@ -205,14 +218,15 @@ func (r *BookingRepository) UpdateExpiresAt(ctx context.Context, id uuid.UUID, e
 
 func (r *BookingRepository) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Booking, error) {
 	query := `
-		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, created_at, updated_at
+		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, scheduled_at, created_at, updated_at
 		FROM bookings WHERE idempotency_key = $1
 	`
 	row := r.db.QueryRow(ctx, query, key)
 
 	var booking domain.Booking
 	var expiresAt sql.NullTime
-	err := row.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &booking.CreatedAt, &booking.UpdatedAt)
+	var scheduledAt sql.NullTime
+	err := row.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &scheduledAt, &booking.CreatedAt, &booking.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -223,13 +237,16 @@ func (r *BookingRepository) GetByIdempotencyKey(ctx context.Context, key string)
 	if expiresAt.Valid {
 		booking.ExpiresAt = &expiresAt.Time
 	}
+	if scheduledAt.Valid {
+		booking.ScheduledAt = &scheduledAt.Time
+	}
 
 	return &booking, nil
 }
 
 func (r *BookingRepository) GetExpiredPendingBookings(ctx context.Context) ([]domain.Booking, error) {
 	query := `
-		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, created_at, updated_at
+		SELECT id, user_id, status, idempotency_key, total_amount, expires_at, scheduled_at, created_at, updated_at
 		FROM bookings
 		WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < NOW()
 	`
@@ -243,12 +260,16 @@ func (r *BookingRepository) GetExpiredPendingBookings(ctx context.Context) ([]do
 	for rows.Next() {
 		var booking domain.Booking
 		var expiresAt sql.NullTime
-		err := rows.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &booking.CreatedAt, &booking.UpdatedAt)
+		var scheduledAt sql.NullTime
+		err := rows.Scan(&booking.ID, &booking.UserID, &booking.Status, &booking.IdempotencyKey, &booking.TotalAmount, &expiresAt, &scheduledAt, &booking.CreatedAt, &booking.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {
 			booking.ExpiresAt = &expiresAt.Time
+		}
+		if scheduledAt.Valid {
+			booking.ScheduledAt = &scheduledAt.Time
 		}
 		bookings = append(bookings, booking)
 	}

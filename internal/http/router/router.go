@@ -99,6 +99,7 @@ func (r *Router) setupRoutes() {
 			protected.GET("/bookings/:id", bookingHandler.GetBooking)
 			protected.POST("/bookings/:id/confirm", bookingHandler.ConfirmBooking)
 			protected.POST("/bookings/:id/cancel", bookingHandler.CancelBooking)
+			protected.POST("/bookings/:id/schedule", bookingHandler.ScheduleBooking)
 		}
 	}
 
