@@ -1,186 +1,186 @@
 # GoBooking — Database Schema & Seed Guide
 
-Tài liệu này mô tả cấu trúc database, mối quan hệ giữa các bảng, cách seed dữ liệu fake phát triển/demo, và các tài khoản demo có sẵn sau khi chạy migration.
+This document describes the database structure, table relationships, seed data setup, and demo accounts.
 
-## 1. Tổng quan
+## 1. Overview
 
-Schema được chia thành 2 nhóm chính:
+The schema is organized into 2 main groups:
 
-| Nhóm | Bảng | Mục đích |
-|------|------|----------|
-| **Domain** | `users`, `flights`, `hotels`, `room_types`, `inventory_units` | Danh mục cốt lõi: người dùng, chuyến bay, khách sạn, loại phòng, unit khả dụng |
-| **Booking** | `bookings`, `booking_items`, `payments`, `idempotency_keys` | Luồng đặt chỗ: đặt chỗ, item, thanh toán, chống trùng |
+| Group | Tables | Purpose |
+|-------|--------|---------|
+| **Domain** | `users`, `flights`, `hotels`, `room_types`, `inventory_units` | Core catalog: users, flights, hotels, room types, available units |
+| **Booking** | `bookings`, `booking_items`, `payments`, `idempotency_keys` | Booking flow: reservations, items, payments, idempotency |
 
-Các migration hiện có:
+### Available Migrations
 
-| # | File | Nội dung |
-|---|------|----------|
-| 1 | `000001_create_users_table` | Bảng users + index email |
-| 2 | `000002_create_flights_table` | Bảng flights + index origin/dest/departure |
-| 3 | `000003_create_hotels_table` | Bảng hotels + index city |
-| 4 | `000004_create_room_types_table` | Bảng room_types + FK -> hotels |
-| 5 | `000005_create_inventory_units_table` | Bảng inventory_units + enum + index |
-| 6 | `000006_create_bookings_table` | Bảng bookings + enum status |
-| 7 | `000007_create_booking_items_table` | Bảng booking_items + FK bookings/inventory |
-| 8 | `000008_create_idempotency_keys_table` | Bảng idempotency_keys |
-| 9 | `000009_create_payments_table` | Bảng payments + enum status |
-| 10 | `000010_add_booking_schedule` | Thêm `scheduled_at` cho bookings |
-| 11 | `000011_seed_fake_data` | Seed dữ liệu fake Việt Nam |
+| # | File | Description |
+|---|------|-------------|
+| 1 | `000001_create_users_table` | Users table + email index |
+| 2 | `000002_create_flights_table` | Flights table + origin/dest/departure index |
+| 3 | `000003_create_hotels_table` | Hotels table + city index |
+| 4 | `000004_create_room_types_table` | Room types table + FK to hotels |
+| 5 | `000005_create_inventory_units_table` | Inventory units table + enum + index |
+| 6 | `000006_create_bookings_table` | Bookings table + status enum |
+| 7 | `000007_create_booking_items_table` | Booking items + FK to bookings/inventory |
+| 8 | `000008_create_idempotency_keys_table` | Idempotency keys table |
+| 9 | `000009_create_payments_table` | Payments table + status enum |
+| 10 | `000010_add_booking_schedule` | Add `scheduled_at` to bookings |
+| 11 | `000011_seed_fake_data` | Seed fake Vietnam data |
 
-## 2. Sơ đồ quan hệ
+## 2. Entity Relationship Diagram
 
-```text
+```
 users (1) ----< bookings (1) ----< booking_items (N) ----< inventory_units (N)
                                                                |
 flights (1) ----< inventory_units                           |
                                                                |
-hotels (1) ----< room_types (1) ----< inventory_units        |
+hotels (1) ----< room_types (1) ----< inventory_units      |
                                                                |
-bookings (1) ----< payments (1)                              |
+bookings (1) ----< payments (1)                           |
                                                                |
 bookings (1) ----< idempotency_keys (1) ---------------------+
 ```
 
-## 3. Chi tiết từng bảng
+## 3. Table Details
 
 ### 3.1 `users`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `email` | VARCHAR(255) UNIQUE | Email đăng nhập |
-| `password_hash` | VARCHAR(255) | Mật khẩu đã hash |
-| `role` | VARCHAR(50) DEFAULT 'user' | Vai trò |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `email` | VARCHAR(255) UNIQUE | Login email |
+| `password_hash` | VARCHAR(255) | Hashed password |
+| `role` | VARCHAR(50) DEFAULT 'user' | User role |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.2 `flights`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `code` | VARCHAR(50) UNIQUE | Mã chuyến bay, VD: `VN101` |
-| `origin` | VARCHAR(100) | Mã sân bay đi |
-| `destination` | VARCHAR(100) | Mã sân bay đến |
-| `departure_time` | TIMESTAMPTZ | Giờ khởi hành |
-| `arrival_time` | TIMESTAMPTZ | Giờ hạ cánh |
-| `base_price` | DECIMAL(12,2) | Giá vé gốc (VND) |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `code` | VARCHAR(50) UNIQUE | Flight code, e.g., `VN101` |
+| `origin` | VARCHAR(100) | Departure airport code |
+| `destination` | VARCHAR(100) | Arrival airport code |
+| `departure_time` | TIMESTAMPTZ | Departure time |
+| `arrival_time` | TIMESTAMPTZ | Arrival time |
+| `base_price` | DECIMAL(12,2) | Base ticket price (VND) |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.3 `hotels`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `name` | VARCHAR(255) | Tên khách sạn |
-| `city` | VARCHAR(100) | Thành phố |
-| `address` | VARCHAR(500) | Địa chỉ |
-| `description` | TEXT | Mô tả |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `name` | VARCHAR(255) | Hotel name |
+| `city` | VARCHAR(100) | City |
+| `address` | VARCHAR(500) | Address |
+| `description` | TEXT | Description |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.4 `room_types`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `hotel_id` | UUID FK -> hotels(id) | Khách sạn |
-| `name` | VARCHAR(100) | Tên loại phòng |
-| `base_price` | DECIMAL(12,2) | Giá/đêm (VND) |
-| `capacity` | INT DEFAULT 2 | Số người tối đa |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `hotel_id` | UUID FK -> hotels(id) | Hotel reference |
+| `name` | VARCHAR(100) | Room type name |
+| `base_price` | DECIMAL(12,2) | Price per night (VND) |
+| `capacity` | INT DEFAULT 2 | Maximum occupancy |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.5 `inventory_units`
 
-Bảng trung tâm quản lý khả dụng của từng seat/room.
+Central table managing availability for each seat/room.
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `resource_type` | ENUM('flight_seat','hotel_room') | Loại resource |
-| `resource_id` | UUID | FK đến `flights.id` hoặc `room_types.id` |
-| `unit_code` | VARCHAR(50) | Mã unit, VD: `J1A`, `RM-1` |
-| `status` | ENUM('available','held','booked','cancelled') | Trạng thái |
-| `held_until` | TIMESTAMPTZ | Thời gian hết hold |
-| `version` | INT DEFAULT 1 | Dùng cho optimistic lock |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `resource_type` | ENUM('flight_seat','hotel_room') | Resource type |
+| `resource_id` | UUID | FK to `flights.id` or `room_types.id` |
+| `unit_code` | VARCHAR(50) | Unit code, e.g., `J1A`, `RM-1` |
+| `status` | ENUM('available','held','booked','cancelled') | Availability status |
+| `held_until` | TIMESTAMPTZ | Hold expiry time |
+| `version` | INT DEFAULT 1 | Used for optimistic locking |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.6 `bookings`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `user_id` | UUID FK -> users(id) | Người đặt |
-| `status` | ENUM('pending','confirmed','cancelled','expired') | Trạng thái |
-| `idempotency_key` | VARCHAR(255) UNIQUE | Key chống trùng |
-| `total_amount` | DECIMAL(12,2) | Tổng tiền (VND) |
-| `expires_at` | TIMESTAMPTZ | Hạn thanh toán |
-| `scheduled_at` | TIMESTAMPTZ | Ngày đi/check-in thực tế |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `user_id` | UUID FK -> users(id) | Booking user |
+| `status` | ENUM('pending','confirmed','cancelled','expired') | Booking status |
+| `idempotency_key` | VARCHAR(255) UNIQUE | Idempotency key |
+| `total_amount` | DECIMAL(12,2) | Total amount (VND) |
+| `expires_at` | TIMESTAMPTZ | Payment deadline |
+| `scheduled_at` | TIMESTAMPTZ | Actual travel/check-in date |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.7 `booking_items`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `booking_id` | UUID FK -> bookings(id) | Đặt chỗ |
-| `inventory_unit_id` | UUID FK -> inventory_units(id) | Unit được đặt |
-| `price` | DECIMAL(12,2) | Giá tại thời điểm đặt |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `booking_id` | UUID FK -> bookings(id) | Booking reference |
+| `inventory_unit_id` | UUID FK -> inventory_units(id) | Reserved unit |
+| `price` | DECIMAL(12,2) | Price at booking time |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
 
 ### 3.8 `payments`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `id` | UUID PK | Khóa chính |
-| `booking_id` | UUID FK -> bookings(id) | Đặt chỗ |
-| `status` | ENUM('pending','completed','failed','refunded') | Trạng thái |
-| `amount` | DECIMAL(12,2) | Số tiền |
-| `provider_ref` | VARCHAR(255) | Mã tham chiếu provider |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `booking_id` | UUID FK -> bookings(id) | Booking reference |
+| `status` | ENUM('pending','completed','failed','refunded') | Payment status |
+| `amount` | DECIMAL(12,2) | Payment amount |
+| `provider_ref` | VARCHAR(255) | Provider reference |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Update timestamp |
 
 ### 3.9 `idempotency_keys`
 
-| Cột | Kiểu | Mô tả |
-|-----|------|-------|
-| `key` | VARCHAR(255) PK | Key idempotency |
-| `request_hash` | VARCHAR(64) | Hash request body |
-| `response_body` | JSONB | Response đã cache |
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | VARCHAR(255) PK | Idempotency key |
+| `request_hash` | VARCHAR(64) | Request body hash |
+| `response_body` | JSONB | Cached response |
 | `status` | VARCHAR(20) | processing/completed/failed |
-| `created_at` | TIMESTAMPTZ | Thời gian tạo |
-| `expires_at` | TIMESTAMPTZ | Hạn cache |
+| `created_at` | TIMESTAMPTZ | Creation timestamp |
+| `expires_at` | TIMESTAMPTZ | Cache expiry |
 
-## 4. Index & Performance
+## 4. Indexes & Performance
 
-| Index | Bảng | Mục đích |
-|-------|------|----------|
-| `idx_users_email` | users | Tìm user theo email |
-| `idx_flights_origin_dest_departure` | flights | Tìm chuyến bay theo route + ngày |
-| `idx_hotels_city` | hotels | Tìm khách sạn theo thành phố |
-| `idx_room_types_hotel_id` | room_types | Lấy room types của 1 khách sạn |
-| `idx_inventory_units_resource` | inventory_units | Lấy units theo flight/room |
-| `idx_inventory_units_status` | inventory_units | Lọc theo trạng thái |
-| `idx_inventory_units_held_until` | inventory_units | Tìm hold hết hạn |
-| `idx_bookings_user_id` | bookings | Lịch sử đặt chỗ của user |
-| `idx_bookings_status` | bookings | Lọc đặt chỗ theo trạng thái |
-| `idx_bookings_idempotency_key` | bookings | Kiểm tra key trùng |
-| `idx_bookings_expires_at` | bookings | Tìm booking hết hạn |
-| `idx_booking_items_booking_id` | booking_items | Lấy items của 1 booking |
-| `idx_booking_items_inventory_unit_id` | booking_items | Tìm booking theo unit |
-| `idx_payments_booking_id` | payments | Lấy payment của 1 booking |
-| `idx_payments_status` | payments | Lọc payment theo trạng thái |
-| `idx_idempotency_keys_expires_at` | idempotency_keys | Dọn key hết hạn |
+| Index | Table | Purpose |
+|-------|-------|---------|
+| `idx_users_email` | users | Find user by email |
+| `idx_flights_origin_dest_departure` | flights | Search by route + date |
+| `idx_hotels_city` | hotels | Search by city |
+| `idx_room_types_hotel_id` | room_types | Get room types for a hotel |
+| `idx_inventory_units_resource` | inventory_units | Get units by flight/room |
+| `idx_inventory_units_status` | inventory_units | Filter by status |
+| `idx_inventory_units_held_until` | inventory_units | Find expired holds |
+| `idx_bookings_user_id` | bookings | User booking history |
+| `idx_bookings_status` | bookings | Filter by status |
+| `idx_bookings_idempotency_key` | bookings | Check for duplicate key |
+| `idx_bookings_expires_at` | bookings | Find expired bookings |
+| `idx_booking_items_booking_id` | booking_items | Get items for a booking |
+| `idx_booking_items_inventory_unit_id` | booking_items | Find booking by unit |
+| `idx_payments_booking_id` | payments | Get payment for a booking |
+| `idx_payments_status` | payments | Filter by payment status |
+| `idx_idempotency_keys_expires_at` | idempotency_keys | Clean up expired keys |
 
 ## 5. Seed Data (Migration 000011)
 
-Migration `000011_seed_fake_data` chứa dữ liệu fake tiếng Việt để phát triển và demo.
+Migration `000011_seed_fake_data` contains fake Vietnamese data for development and demo.
 
-### 5.1 Users (3 tài khoản)
+### 5.1 Users (3 accounts)
 
 | Email | Password (demo) | Role |
 |-------|----------------|------|
@@ -188,10 +188,10 @@ Migration `000011_seed_fake_data` chứa dữ liệu fake tiếng Việt để p
 | `tran.thi.b@example.com` | `hashed_demo_2` | user |
 | `le.van.c@example.com` | `hashed_demo_3` | user |
 
-### 5.2 Flights (6 chuyến)
+### 5.2 Flights (6 flights)
 
-| Mã | Route | Ngày | Giờ | Giá (VND) |
-|----|-------|------|-----|-----------|
+| Code | Route | Date | Time | Price (VND) |
+|------|-------|------|------|-------------|
 | VN101 | SGN → HAN | 2026-07-20 | 08:00 - 10:30 | 1,200,000 |
 | VN102 | HAN → SGN | 2026-07-20 | 14:00 - 16:30 | 1,200,000 |
 | VN103 | SGN → DAD | 2026-07-21 | 09:00 - 10:30 | 800,000 |
@@ -199,43 +199,43 @@ Migration `000011_seed_fake_data` chứa dữ liệu fake tiếng Việt để p
 | VN105 | HAN → DAD | 2026-07-22 | 11:00 - 12:30 | 600,000 |
 | VN201 | SGN → PQC | 2026-07-23 | 07:00 - 09:00 | 900,000 |
 
-Mỗi chuyến có **120 ghế** (12 hàng Business J1-J12 + 8 hàng Economy 13-20, mỗi hàng 6 ghế A-F).
+Each flight has **120 seats** (12 Business rows J1-J12 + 8 Economy rows 13-20, each row 6 seats A-F).
 
-### 5.3 Hotels (3 khách sạn)
+### 5.3 Hotels (3 hotels)
 
-| Tên | Thành phố | Địa chỉ |
-|-----|-----------|---------|
-| Khách sạn Sài Gòn | Ho Chi Minh | 123 Đồng Khởi, Quận 1 |
-| Khách sạn Hà Nội | Hanoi | 456 Phố Cổ, Hoàn Kiếm |
-| Khách sạn Đà Nẵng | Da Nang | 789 Bãi biển Mỹ Khê |
+| Name | City | Address |
+|------|------|---------|
+| Saigon Hotel | Ho Chi Minh | 123 Dong Khoi, District 1 |
+| Hanoi Hotel | Hanoi | 456 Old Quarter, Hoan Kiem |
+| Da Nang Hotel | Da Nang | 789 My Khe Beach |
 
-Mỗi khách sạn có **2 loại phòng**: Standard + Deluxe.
+Each hotel has **2 room types**: Standard + Deluxe.
 
-### 5.4 Room Types (6 loại)
+### 5.4 Room Types (6 types)
 
-| Khách sạn | Loại | Giá/đêm (VND) | Sức chứa |
-|-----------|------|---------------|----------|
-| Sài Gòn | Standard | 800,000 | 2 |
-| Sài Gòn | Deluxe | 1,800,000 | 3 |
-| Hà Nội | Standard | 700,000 | 2 |
-| Hà Nội | Deluxe | 1,600,000 | 3 |
-| Đà Nẵng | Standard | 600,000 | 2 |
-| Đà Nẵng | Deluxe | 1,400,000 | 4 |
+| Hotel | Type | Price/night (VND) | Capacity |
+|-------|------|-------------------|----------|
+| Saigon | Standard | 800,000 | 2 |
+| Saigon | Deluxe | 1,800,000 | 3 |
+| Hanoi | Standard | 700,000 | 2 |
+| Hanoi | Deluxe | 1,600,000 | 3 |
+| Da Nang | Standard | 600,000 | 2 |
+| Da Nang | Deluxe | 1,400,000 | 4 |
 
-Mỗi loại có **5 phòng** (RM-1 đến RM-5).
+Each type has **5 rooms** (RM-1 through RM-5).
 
-### 5.5 Bookings (3 đặt chỗ demo)
+### 5.5 Bookings (3 demo bookings)
 
-| Booking | User | Status | Tổng (VND) | Ghi chú |
-|---------|------|--------|-----------|---------|
-| BOOK-1 | nguyen.van.a | confirmed | 1,200,000 | Đã thanh toán |
-| BOOK-2 | tran.thi.b | pending | 800,000 | Đang giữ phòng |
-| BOOK-3 | le.van.c | cancelled | 800,000 | Đã hủy |
+| Booking | User | Status | Total (VND) | Notes |
+|---------|------|--------|-------------|-------|
+| BOOK-1 | nguyen.van.a | confirmed | 1,200,000 | Paid |
+| BOOK-2 | tran.thi.b | pending | 800,000 | Room on hold |
+| BOOK-3 | le.van.c | cancelled | 800,000 | Cancelled |
 
-### 5.6 Tổng số record seed
+### 5.6 Total Seed Records
 
-| Bảng | Số lượng |
-|------|----------|
+| Table | Count |
+|-------|-------|
 | users | 3 |
 | flights | 6 |
 | hotels | 3 |
@@ -247,32 +247,32 @@ Mỗi loại có **5 phòng** (RM-1 đến RM-5).
 | payments | 1 |
 | idempotency_keys | 2 |
 
-## 6. Cách chạy migration
+## 6. Running Migrations
 
-### 6.1 Cài đặt tool
+### 6.1 Install the Tool
 
 ```bash
 # macOS/Linux
 brew install golang-migrate
 
 # Windows (PowerShell)
-# Tải binary từ https://github.com/golang-migrate/migrate/releases
-# Hoặc dùng Chocolatey: choco install golang-migrate
+# Download binary from https://github.com/golang-migrate/migrate/releases
+# Or use Chocolatey: choco install golang-migrate
 ```
 
-### 6.2 Chạy tất cả migrations
+### 6.2 Run All Migrations
 
 ```bash
 migrate -path migrations -database "postgres://gobooking:gobooking@localhost:5432/gobooking?sslmode=disable" up
 ```
 
-### 6.3 Rollback migration cuối
+### 6.3 Rollback Last Migration
 
 ```bash
 migrate -path migrations -database "postgres://gobooking:gobooking@localhost:5432/gobooking?sslmode=disable" down 1
 ```
 
-### 6.4 Kiểm tra version hiện tại
+### 6.4 Check Current Version
 
 ```bash
 migrate -path migrations -database "postgres://gobooking:gobooking@localhost:5432/gobooking?sslmode=disable" version
@@ -280,37 +280,41 @@ migrate -path migrations -database "postgres://gobooking:gobooking@localhost:543
 
 ## 7. Demo Accounts
 
-Sau khi chạy `000011_seed_fake_data`, bạn có thể dùng các tài khoản sau để test frontend:
+After running `000011_seed_fake_data`, use these accounts to test the frontend:
 
 ```
 Email: nguyen.van.a@example.com
-→ Đã có 1 booking confirmed (VN101)
+→ Has 1 confirmed booking (VN101)
 
 Email: tran.thi.b@example.com
-→ Đã có 1 booking pending (khách sạn Sài Gòn)
+→ Has 1 pending booking (Saigon Hotel)
 
 Email: le.van.c@example.com
-→ Đã có 1 booking cancelled (VN103)
+→ Has 1 cancelled booking (VN103)
 ```
 
-> **Lưu ý:** Đây là demo data. Mật khẩu là hash giả (`hashed_demo_1/2/3`). Backend hiện tại chưa có endpoint đăng nhập thực, frontend dùng mock auth. Dữ liệu này chủ yếu để search/hold/booking API có data thật để test.
+> **Note:** This is demo data. Passwords are mock hashes (`hashed_demo_1/2/3`). The backend currently does not have a real login endpoint; the frontend uses mock auth. This data primarily provides real data for search/hold/booking API testing.
 
-## 8. Lưu ý kỹ thuật
+## 8. Technical Notes
 
-1. **UUID cố định**: Seed data dùng UUID cố định (ví dụ: `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` cho VN101) để dễ debug và tham chiếu.
-2. **Timestamps**: Ngày giờ seed dùng UTC (`+00`). Các booking có `expires_at` dùng `NOW() + INTERVAL '10 minutes'` để luôn trong tương lai khi chạy migration.
-3. **Inventory status**:
-   - `available`: unit có thể đặt
-   - `held`: đang được giữ 10 phút
-   - `booked`: đã xác nhận thanh toán
-   - `cancelled`: đã hủy
-4. **Down migration**: Xóa theo UUID cụ thể, không dùng `TRUNCATE` để tránh mất data của user khác.
-5. **Idempotency**: Seed 2 idempotency keys để test retry không trùng.
+1. **Fixed UUIDs**: Seed data uses fixed UUIDs (e.g., `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` for VN101) for easier debugging and reference.
 
-## 9. Query hữu ích
+2. **Timestamps**: Seed dates use UTC (`+00`). Bookings have `expires_at` set using `NOW() + INTERVAL '10 minutes'` to always be in the future.
+
+3. **Inventory Status**:
+   - `available`: unit can be booked
+   - `held`: temporarily reserved for 10 minutes
+   - `booked`: confirmed and paid
+   - `cancelled`: cancelled
+
+4. **Down Migration**: Deletes by specific UUID, not using `TRUNCATE` to avoid losing other users' data.
+
+5. **Idempotency**: Seeds 2 idempotency keys for retry testing.
+
+## 9. Useful Queries
 
 ```sql
--- Xem tất cả chuyến bay còn ghế
+-- View all flights with available seats
 SELECT f.code, f.origin, f.destination, f.departure_time, f.base_price,
        COUNT(iu.id) FILTER (WHERE iu.status = 'available') AS seats_left
 FROM flights f
@@ -318,7 +322,7 @@ LEFT JOIN inventory_units iu ON iu.resource_id = f.id AND iu.resource_type = 'fl
 GROUP BY f.id
 ORDER BY f.departure_time;
 
--- Xem phòng trống của 1 khách sạn
+-- View available rooms for a hotel
 SELECT h.name, rt.name AS room_type, rt.base_price,
        COUNT(iu.id) FILTER (WHERE iu.status = 'available') AS rooms_left
 FROM hotels h
@@ -327,7 +331,7 @@ LEFT JOIN inventory_units iu ON iu.resource_id = rt.id AND iu.resource_type = 'h
 WHERE h.city = 'Ho Chi Minh'
 GROUP BY h.id, rt.id;
 
--- Xem booking của user
+-- View user's bookings
 SELECT b.id, b.status, b.total_amount, b.created_at,
        bi.price, iu.unit_code, f.code
 FROM bookings b
@@ -337,12 +341,12 @@ LEFT JOIN flights f ON f.id = iu.resource_id AND iu.resource_type = 'flight_seat
 WHERE b.user_id = '11111111-1111-1111-1111-111111111111'
 ORDER BY b.created_at DESC;
 
--- Dọn hold hết hạn (giả lập worker)
+-- Release expired holds (simulate worker)
 UPDATE inventory_units
 SET status = 'available', held_until = NULL, version = version + 1, updated_at = NOW()
 WHERE status = 'held' AND held_until < NOW();
 
--- Đếm tổng inventory đang hold
+-- Count inventory by status
 SELECT resource_type, status, COUNT(*) 
 FROM inventory_units 
 GROUP BY resource_type, status;
